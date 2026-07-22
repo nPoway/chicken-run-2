@@ -268,7 +268,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ChickenRun/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "SkyBound Steps";
+				INFOPLIST_KEY_CFBundleDisplayName = "Road to Heaven:Luetti";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -308,7 +308,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ChickenRun/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "SkyBound Steps";
+				INFOPLIST_KEY_CFBundleDisplayName = "Road to Heaven:Luetti";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
