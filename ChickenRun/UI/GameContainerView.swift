@@ -57,6 +57,59 @@ private final class FlightPresentationModel: ObservableObject {
     }
 }
 
+@MainActor
+private enum GameplayHaptics {
+    private static let lightImpact = UIImpactFeedbackGenerator(style: .light)
+    private static let mediumImpact = UIImpactFeedbackGenerator(style: .medium)
+    private static let rigidImpact = UIImpactFeedbackGenerator(style: .rigid)
+    private static let heavyImpact = UIImpactFeedbackGenerator(style: .heavy)
+    private static let softImpact = UIImpactFeedbackGenerator(style: .soft)
+    private static let notification = UINotificationFeedbackGenerator()
+
+    static func prepare() {
+        lightImpact.prepare()
+        mediumImpact.prepare()
+        rigidImpact.prepare()
+        heavyImpact.prepare()
+        softImpact.prepare()
+        notification.prepare()
+    }
+
+    static func landing(on family: CloudFamily) {
+        switch family {
+        case .fluffy:
+            lightImpact.impactOccurred(intensity: 0.72)
+        case .windy:
+            mediumImpact.impactOccurred(intensity: 0.72)
+        case .spring:
+            rigidImpact.impactOccurred(intensity: 1)
+        case .storm:
+            heavyImpact.impactOccurred(intensity: 0.92)
+        }
+        prepare()
+    }
+
+    static func pickup() {
+        softImpact.impactOccurred(intensity: 0.82)
+        softImpact.prepare()
+    }
+
+    static func flap() {
+        rigidImpact.impactOccurred(intensity: 0.92)
+        rigidImpact.prepare()
+    }
+
+    static func flow() {
+        notification.notificationOccurred(.success)
+        notification.prepare()
+    }
+
+    static func finish() {
+        mediumImpact.impactOccurred(intensity: 0.86)
+        mediumImpact.prepare()
+    }
+}
+
 struct GameContainerView: View {
     @ObservedObject var store: GameStore
     @Environment(\.scenePhase) private var scenePhase
@@ -171,6 +224,9 @@ struct GameContainerView: View {
     }
 
     private func makeScene(size: CGSize) -> ChickenGameScene {
+        if store.profile.settings.hapticsEnabled {
+            GameplayHaptics.prepare()
+        }
         let newScene = ChickenGameScene(size: size, profile: store.profile)
         newScene.onSnapshot = { snapshot in
             presentation.accept(snapshot)
@@ -226,14 +282,16 @@ struct GameContainerView: View {
 
         for event in events {
             switch event {
-            case .landed:
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case let .landed(_, family, _):
+                GameplayHaptics.landing(on: family)
             case .featherCollected:
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-            case .flapActivated, .airflowActivated:
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                GameplayHaptics.pickup()
+            case .flapActivated:
+                GameplayHaptics.flap()
+            case .airflowActivated:
+                GameplayHaptics.flow()
             case .finished:
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                GameplayHaptics.finish()
             default:
                 break
             }

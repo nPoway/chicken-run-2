@@ -28,6 +28,8 @@ final class ChickenGameScene: SKScene {
     private var isFlowVisible = false
 
     private let worldLayer = SKNode()
+    private let effectsLayer = SKNode()
+    private let calloutLayer = SKNode()
     private var backdropNode: SKSpriteNode?
     private var skyNode: MorningSkyDecorationNode?
     private var chickenNode: ChickenArtNode?
@@ -40,7 +42,7 @@ final class ChickenGameScene: SKScene {
             headwear: GameCatalog.cosmetic(id: profile.equippedCosmetics[CosmeticCategory.headwear.rawValue]),
             backpack: GameCatalog.cosmetic(id: profile.equippedCosmetics[CosmeticCategory.backpack.rawValue])
         )
-        reducedEffects = profile.settings.reduceEffects
+        reducedEffects = profile.settings.reduceEffects || UIAccessibility.isReduceMotionEnabled
         simulation = ChickenGameScene.makeSimulation(for: size)
         super.init(size: size)
         scaleMode = .resizeFill
@@ -76,13 +78,20 @@ final class ChickenGameScene: SKScene {
         worldLayer.zPosition = 0
         addChild(worldLayer)
 
+        effectsLayer.zPosition = 40
+        worldLayer.addChild(effectsLayer)
+
+        calloutLayer.zPosition = 70
+        worldLayer.addChild(calloutLayer)
+
         let chicken = ChickenArtwork.makeChicken(appearance: appearance)
         chicken.zPosition = 50
         worldLayer.addChild(chicken)
         chickenNode = chicken
 
-        render(simulation.snapshot)
-        deliverSnapshot()
+        let snapshot = simulation.snapshot
+        render(snapshot)
+        deliverSnapshot(snapshot)
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -98,8 +107,9 @@ final class ChickenGameScene: SKScene {
 
         if lastUpdateTime == 0 {
             lastUpdateTime = currentTime
-            render(simulation.snapshot)
-            deliverSnapshot()
+            let snapshot = simulation.snapshot
+            render(snapshot)
+            deliverSnapshot(snapshot)
             return
         }
 
@@ -122,18 +132,26 @@ final class ChickenGameScene: SKScene {
 
         let events = simulation.advance(by: frameDelta, input: input)
         process(events)
-        render(simulation.snapshot)
-        deliverSnapshot()
+        let snapshot = simulation.snapshot
+        render(snapshot)
+        deliverSnapshot(snapshot)
     }
 
     func setHorizontalInput(_ input: CGFloat) {
-        horizontalInput = min(max(input, -1), 1)
+        let nextInput = min(max(input, -1), 1)
+        if abs(nextInput) > 0.01, abs(horizontalInput) <= 0.01 {
+            chickenNode?.playSwipeFeedback(direction: nextInput, reducedMotion: reducedEffects)
+        }
+        horizontalInput = nextInput
     }
 
     func applySwipeImpulse(direction: CGFloat) {
         guard direction != 0, !simulation.snapshot.isPaused, !simulation.snapshot.isFinished else { return }
         swipeImpulseDirection = direction > 0 ? 1 : -1
         swipeImpulseRemaining = 0.22
+        chickenNode?.playSwipeFeedback(direction: swipeImpulseDirection, reducedMotion: reducedEffects)
+        playActionBurst(at: chickenNode?.position, direction: swipeImpulseDirection)
+        playWorldKick(x: swipeImpulseDirection * 2.5, y: 0)
     }
 
     func requestFlap() {
@@ -148,24 +166,27 @@ final class ChickenGameScene: SKScene {
             simulation.pause()
         }
         process(simulation.lastEvents)
-        render(simulation.snapshot)
-        deliverSnapshot()
+        let snapshot = simulation.snapshot
+        render(snapshot)
+        deliverSnapshot(snapshot)
     }
 
     func pause() {
         guard !simulation.snapshot.isPaused, !simulation.snapshot.isFinished else { return }
         simulation.pause()
         process(simulation.lastEvents)
-        render(simulation.snapshot)
-        deliverSnapshot()
+        let snapshot = simulation.snapshot
+        render(snapshot)
+        deliverSnapshot(snapshot)
     }
 
     func resume() {
         guard simulation.snapshot.isPaused, !simulation.snapshot.isFinished else { return }
         simulation.resume()
         process(simulation.lastEvents)
-        render(simulation.snapshot)
-        deliverSnapshot()
+        let snapshot = simulation.snapshot
+        render(snapshot)
+        deliverSnapshot(snapshot)
     }
 
     func restart() {
@@ -178,13 +199,26 @@ final class ChickenGameScene: SKScene {
         lastUpdateTime = 0
         isFlowVisible = false
 
+        removeAction(forKey: "scene.finishDelivery")
+        worldLayer.removeAllActions()
+        worldLayer.position = .zero
+        effectsLayer.removeAllChildren()
+        calloutLayer.removeAllChildren()
+
         cloudNodes.values.forEach { $0.removeFromParent() }
         featherNodes.values.forEach { $0.removeFromParent() }
         cloudNodes = [:]
         featherNodes = [:]
 
-        render(simulation.snapshot)
-        deliverSnapshot()
+        chickenNode?.removeFromParent()
+        let chicken = ChickenArtwork.makeChicken(appearance: appearance)
+        chicken.zPosition = 50
+        worldLayer.addChild(chicken)
+        chickenNode = chicken
+
+        let snapshot = simulation.snapshot
+        render(snapshot)
+        deliverSnapshot(snapshot)
     }
 
     private var resolvedHorizontalInput: CGFloat {
@@ -197,28 +231,44 @@ final class ChickenGameScene: SKScene {
     private func process(_ events: [SimulationEvent]) {
         guard !events.isEmpty else { return }
 
+        let activatesAirflow = events.contains { event in
+            if case .airflowActivated = event { return true }
+            return false
+        }
+
         for event in events {
             switch event {
-            case let .landed(cloudID, _, _):
+            case let .landed(cloudID, family, bounceVelocity):
                 chickenNode?.playLandingFeedback(reducedMotion: reducedEffects)
                 cloudNodes[cloudID]?.playLandingFeedback(reducedMotion: reducedEffects)
+                playLandingImpact(
+                    cloudID: cloudID,
+                    family: family,
+                    bounceVelocity: bounceVelocity,
+                    showCallout: !activatesAirflow
+                )
 
-            case let .featherCollected(featherID, _, _):
+            case let .featherCollected(featherID, _, flapCharge):
+                let pickupPosition = featherNodes[featherID]?.position ?? chickenNode?.position ?? .zero
                 if let feather = featherNodes.removeValue(forKey: featherID) {
                     feather.playCollection(reducedMotion: reducedEffects)
                 }
+                chickenNode?.playPickupFeedback(reducedMotion: reducedEffects)
+                playPickupFeedback(at: pickupPosition, flapCharge: flapCharge)
 
             case .flapActivated:
                 playFlapFeedback()
 
             case .airflowActivated:
                 chickenNode?.setFlowActive(true, reducedMotion: reducedEffects)
+                playAirflowActivation()
 
             case .airflowExpired:
                 chickenNode?.setFlowActive(false, reducedMotion: reducedEffects)
 
             case let .stormCloudTriggered(cloudID):
                 cloudNodes[cloudID]?.playStormWarning(reducedMotion: reducedEffects)
+                playStormFlash(at: cloudNodes[cloudID]?.position)
 
             case let .stormCloudDissolved(cloudID):
                 cloudNodes.removeValue(forKey: cloudID)?.removeFromParent()
@@ -227,7 +277,11 @@ final class ChickenGameScene: SKScene {
                 playSoftFall()
                 if !didDeliverResult {
                     didDeliverResult = true
-                    onFinished?(result)
+                    let delay = reducedEffects ? 0.12 : 0.34
+                    run(.sequence([
+                        .wait(forDuration: delay),
+                        .run { [weak self] in self?.onFinished?(result) }
+                    ]), withKey: "scene.finishDelivery")
                 }
 
             case .paused, .resumed:
@@ -294,8 +348,19 @@ final class ChickenGameScene: SKScene {
         }
 
         if let chickenNode {
-            chickenNode.position = screenPosition(for: snapshot.player.position, cameraY: snapshot.cameraY)
-            chickenNode.zRotation = min(max(snapshot.player.velocity.x / 2_800, -0.13), 0.13)
+            var playerPosition = screenPosition(for: snapshot.player.position, cameraY: snapshot.cameraY)
+            // The illustration is intentionally much wider than the physics
+            // radius. Keep the art readable at the side walls without changing
+            // collision rules or the generated route.
+            playerPosition.x = min(max(playerPosition.x, 60), size.width - 60)
+            chickenNode.position = playerPosition
+            chickenNode.updateFlightPose(
+                verticalVelocity: snapshot.player.velocity.y,
+                horizontalVelocity: snapshot.player.velocity.x,
+                elapsedTime: snapshot.elapsedTime,
+                isPaused: snapshot.isPaused || snapshot.isFinished,
+                reducedMotion: reducedEffects
+            )
         }
 
         let parallaxX = size.width / 2 - snapshot.player.position.x
@@ -307,11 +372,16 @@ final class ChickenGameScene: SKScene {
     }
 
     private func playFlapFeedback() {
-        guard let chickenNode, !reducedEffects else { return }
-        chickenNode.removeAction(forKey: "scene.flap")
-        let lift = SKAction.moveBy(x: 0, y: 5, duration: 0.08)
-        let settle = SKAction.moveBy(x: 0, y: -5, duration: 0.11)
-        chickenNode.run(.sequence([lift, settle]), withKey: "scene.flap")
+        guard let chickenNode else { return }
+        chickenNode.playFlapFeedback(reducedMotion: reducedEffects)
+        playActionBurst(at: chickenNode.position)
+        showCallout(
+            "FLAP!",
+            at: CGPoint(x: chickenNode.position.x, y: chickenNode.position.y + 132),
+            tint: UIColor(red: 1, green: 0.80, blue: 0.26, alpha: 1),
+            emphasized: true
+        )
+        playWorldKick(x: 0, y: -3.5)
     }
 
     private func playSoftFall() {
@@ -324,8 +394,155 @@ final class ChickenGameScene: SKScene {
         effect.playAndRemove(reducedMotion: reducedEffects)
     }
 
-    private func deliverSnapshot() {
-        onSnapshot?(simulation.snapshot)
+    private func playLandingImpact(
+        cloudID: Int,
+        family: CloudFamily,
+        bounceVelocity: CGFloat,
+        showCallout shouldShowCallout: Bool
+    ) {
+        guard let cloud = cloudNodes[cloudID] else { return }
+
+        let intensity = min(max(bounceVelocity / 690, 0.85), 1.30)
+        let contactPoint = CGPoint(
+            x: cloud.position.x,
+            y: cloud.position.y + cloud.platformHeight * 0.44
+        )
+        let burst = ChickenArtwork.makeLandingBurst(family: family, intensity: intensity)
+        burst.position = contactPoint
+        effectsLayer.addChild(burst)
+        burst.playAndRemove(reducedMotion: reducedEffects)
+
+        if shouldShowCallout, family != .storm {
+            showCallout(
+                landingCallout(for: family),
+                at: CGPoint(x: contactPoint.x, y: contactPoint.y + 145),
+                tint: landingTint(for: family),
+                emphasized: family == .spring || family == .storm
+            )
+        }
+
+        let kick = family == .spring ? -4.5 : family == .storm ? -4 : -2.2
+        playWorldKick(x: 0, y: kick * intensity)
+    }
+
+    private func playPickupFeedback(at position: CGPoint, flapCharge: Int) {
+        let reward = ChickenArtwork.makeFloatingReward(text: "+1")
+        reward.position = CGPoint(x: position.x, y: position.y + 15)
+        calloutLayer.addChild(reward)
+        reward.playAndRemove(reducedMotion: reducedEffects)
+
+        let sparkle = ChickenArtwork.makeActionBurst(
+            tint: UIColor(red: 1, green: 0.82, blue: 0.28, alpha: 1)
+        )
+        sparkle.position = position
+        sparkle.setScale(0.55)
+        effectsLayer.addChild(sparkle)
+        sparkle.playAndRemove(reducedMotion: reducedEffects)
+
+        if flapCharge >= simulation.snapshot.flapRequirement, let chickenNode {
+            showCallout(
+                "⚡ FLAP READY!",
+                at: CGPoint(x: chickenNode.position.x, y: chickenNode.position.y + 138),
+                tint: UIColor(red: 1, green: 0.73, blue: 0.18, alpha: 1),
+                emphasized: true
+            )
+            playActionBurst(at: chickenNode.position)
+        }
+    }
+
+    private func playAirflowActivation() {
+        guard let chickenNode else { return }
+        showCallout(
+            "FLOW ×2!",
+            at: CGPoint(x: chickenNode.position.x, y: chickenNode.position.y + 142),
+            tint: UIColor(red: 1, green: 0.86, blue: 0.30, alpha: 1),
+            emphasized: true
+        )
+        playActionBurst(at: chickenNode.position)
+        playWorldKick(x: 0, y: -4)
+    }
+
+    private func playActionBurst(at position: CGPoint?, direction: CGFloat = 0) {
+        guard let position else { return }
+        let burst = ChickenArtwork.makeActionBurst(direction: direction)
+        burst.position = CGPoint(x: position.x, y: position.y + 34)
+        effectsLayer.addChild(burst)
+        burst.playAndRemove(reducedMotion: reducedEffects)
+    }
+
+    private func playStormFlash(at position: CGPoint?) {
+        guard let position else { return }
+
+        if !reducedEffects {
+            let flash = SKSpriteNode(color: UIColor.white, size: size)
+            flash.position = CGPoint(x: size.width / 2, y: size.height / 2)
+            flash.zPosition = 95
+            flash.alpha = 0.22
+            flash.blendMode = .add
+            addChild(flash)
+            flash.run(.sequence([
+                .fadeOut(withDuration: 0.14),
+                .removeFromParent()
+            ]))
+        }
+
+        showCallout(
+            "⚡ ZAP!",
+            at: CGPoint(x: position.x, y: position.y + 78),
+            tint: UIColor(red: 1, green: 0.86, blue: 0.28, alpha: 1),
+            emphasized: true
+        )
+    }
+
+    private func showCallout(
+        _ text: String,
+        at position: CGPoint,
+        tint: UIColor,
+        emphasized: Bool
+    ) {
+        let callout = ChickenArtwork.makeFloatingReward(
+            text: text,
+            tint: tint,
+            emphasized: emphasized
+        )
+        callout.position = position
+        calloutLayer.addChild(callout)
+        callout.playAndRemove(reducedMotion: reducedEffects)
+    }
+
+    private func playWorldKick(x: CGFloat, y: CGFloat) {
+        guard !reducedEffects else { return }
+        worldLayer.removeAction(forKey: "scene.worldKick")
+        worldLayer.position = .zero
+        let push = SKAction.moveBy(x: x, y: y, duration: 0.045)
+        push.timingMode = .easeOut
+        let overshoot = SKAction.moveBy(x: -x * 1.35, y: -y * 1.35, duration: 0.065)
+        overshoot.timingMode = .easeInEaseOut
+        let settle = SKAction.move(to: .zero, duration: 0.08)
+        settle.timingMode = .easeOut
+        worldLayer.run(.sequence([push, overshoot, settle]), withKey: "scene.worldKick")
+    }
+
+    private func landingCallout(for family: CloudFamily) -> String {
+        switch family {
+        case .fluffy: return "BOUNCE!"
+        case .windy: return "WHOOSH!"
+        case .spring: return "SUPER JUMP!"
+        case .storm: return "⚡ ZAP!"
+        }
+    }
+
+    private func landingTint(for family: CloudFamily) -> UIColor {
+        switch family {
+        case .fluffy: return UIColor.white
+        case .windy: return UIColor(red: 0.38, green: 0.84, blue: 0.96, alpha: 1)
+        case .spring: return UIColor(red: 0.76, green: 0.55, blue: 1, alpha: 1)
+        case .storm: return UIColor(red: 1, green: 0.86, blue: 0.28, alpha: 1)
+        }
+    }
+
+    private func deliverSnapshot(_ snapshot: RunSnapshot) {
+        onSnapshot?(snapshot)
     }
 
     private static func makeSimulation(for size: CGSize) -> RunSimulation {

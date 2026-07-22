@@ -87,6 +87,32 @@ enum ChickenArtwork {
         SoftFallEffectNode(tint: tint)
     }
 
+    static func makeLandingBurst(
+        family: CloudFamily,
+        intensity: CGFloat = 1
+    ) -> LandingBurstNode {
+        LandingBurstNode(family: family, intensity: intensity)
+    }
+
+    static func makeFloatingReward(
+        text: String,
+        tint: UIColor? = nil,
+        emphasized: Bool = false
+    ) -> FloatingRewardNode {
+        FloatingRewardNode(
+            text: text,
+            tint: tint ?? featherGold,
+            emphasized: emphasized
+        )
+    }
+
+    static func makeActionBurst(
+        tint: UIColor? = nil,
+        direction: CGFloat = 0
+    ) -> ActionBurstNode {
+        ActionBurstNode(tint: tint ?? flowGold, direction: direction)
+    }
+
     static func makeMorningSky(
         size: CGSize,
         seed: UInt64 = 0xC11C_3EED
@@ -100,9 +126,12 @@ enum ChickenArtwork {
 @MainActor
 final class ChickenArtNode: SKNode {
     private var flowEffect: FlowEffectNode?
+    private let reactionLayer = SKNode()
+    private let poseLayer = SKNode()
     private var plumageLayer = SKNode()
     private var wingLayer = SKNode()
     private var accessoryLayer = SKNode()
+    private var facingDirection: CGFloat = 1
 
     private(set) var appearance: ChickenArtwork.Appearance
 
@@ -129,52 +158,140 @@ final class ChickenArtNode: SKNode {
         flowEffect.setActive(isActive, reducedMotion: reducedMotion)
     }
 
+    /// Applies a continuous, velocity-driven character pose without touching
+    /// the root node that the renderer uses for simulation coordinates.
+    func updateFlightPose(
+        verticalVelocity: CGFloat,
+        horizontalVelocity: CGFloat,
+        elapsedTime: TimeInterval,
+        isPaused: Bool,
+        reducedMotion: Bool = false
+    ) {
+        let previousFacing = facingDirection
+        if horizontalVelocity > 42 {
+            facingDirection = 1
+        } else if horizontalVelocity < -42 {
+            facingDirection = -1
+        }
+        if previousFacing != facingDirection {
+            poseLayer.xScale = facingDirection * max(abs(poseLayer.xScale), 0.92)
+        }
+
+        guard !reducedMotion, !isPaused else {
+            poseLayer.position = .zero
+            poseLayer.zRotation = 0
+            poseLayer.xScale = facingDirection
+            poseLayer.yScale = 1
+            return
+        }
+
+        let rise = min(max(verticalVelocity / 825, -1), 1)
+        let horizontal = min(max(horizontalVelocity / 315, -1), 1)
+        let nearApex = max(0, 1 - abs(verticalVelocity) / 190)
+        let bob = sin(CGFloat(elapsedTime) * 9) * 1.4 * nearApex
+
+        let targetXScale = 1 - max(rise, 0) * 0.055 + max(-rise, 0) * 0.035
+        let targetYScale = 1 + max(rise, 0) * 0.075 - max(-rise, 0) * 0.045
+        let targetRotation = -horizontal * 0.115
+
+        let currentXScale = abs(poseLayer.xScale)
+        let nextXScale = currentXScale + (targetXScale - currentXScale) * 0.22
+        poseLayer.xScale = facingDirection * nextXScale
+        poseLayer.yScale += (targetYScale - poseLayer.yScale) * 0.22
+        poseLayer.zRotation += (targetRotation - poseLayer.zRotation) * 0.18
+        poseLayer.position.y += (bob - poseLayer.position.y) * 0.20
+    }
+
     func playLandingFeedback(reducedMotion: Bool = false) {
         guard !reducedMotion else { return }
 
-        removeAction(forKey: "art.landing")
-        let squat = SKAction.scaleY(to: 0.88, duration: 0.06)
-        let spring = SKAction.scaleY(to: 1.06, duration: 0.10)
-        let settle = SKAction.scaleY(to: 1, duration: 0.11)
-        run(.sequence([squat, spring, settle]), withKey: "art.landing")
+        prepareReaction()
+        let squat = SKAction.scaleX(to: 1.13, y: 0.78, duration: 0.055)
+        let spring = SKAction.scaleX(to: 0.94, y: 1.10, duration: 0.10)
+        let settle = SKAction.scale(to: 1, duration: 0.12)
+        reactionLayer.run(.sequence([squat, spring, settle]), withKey: "art.reaction")
+    }
+
+    func playFlapFeedback(reducedMotion: Bool = false) {
+        guard !reducedMotion else { return }
+
+        prepareReaction()
+        let gather = SKAction.scaleX(to: 1.10, y: 0.90, duration: 0.055)
+        let launch = SKAction.scaleX(to: 0.87, y: 1.17, duration: 0.085)
+        let settle = SKAction.scale(to: 1, duration: 0.14)
+        reactionLayer.run(.sequence([gather, launch, settle]), withKey: "art.reaction")
+    }
+
+    func playPickupFeedback(reducedMotion: Bool = false) {
+        guard !reducedMotion else { return }
+
+        prepareReaction()
+        let pop = SKAction.scale(to: 1.08, duration: 0.065)
+        let settle = SKAction.scale(to: 1, duration: 0.12)
+        reactionLayer.run(.sequence([pop, settle]), withKey: "art.reaction")
+    }
+
+    func playSwipeFeedback(direction: CGFloat, reducedMotion: Bool = false) {
+        guard !reducedMotion, direction != 0 else { return }
+
+        prepareReaction()
+        let nudge = SKAction.moveBy(x: direction > 0 ? 5 : -5, y: 0, duration: 0.055)
+        let recover = SKAction.moveTo(x: 0, duration: 0.13)
+        reactionLayer.run(.sequence([nudge, recover]), withKey: "art.reaction")
     }
 
     func playSoftFall(reducedMotion: Bool = false) {
         guard !reducedMotion else { return }
 
-        removeAction(forKey: "art.softFall")
+        reactionLayer.removeAction(forKey: "art.softFall")
         let tilt = SKAction.rotate(toAngle: -0.16, duration: 0.10, shortestUnitArc: true)
         let recover = SKAction.rotate(toAngle: 0, duration: 0.22, shortestUnitArc: true)
-        run(.sequence([tilt, recover]), withKey: "art.softFall")
+        reactionLayer.run(.sequence([tilt, recover]), withKey: "art.softFall")
+    }
+
+    private func prepareReaction() {
+        reactionLayer.removeAction(forKey: "art.reaction")
+        reactionLayer.position = .zero
+        reactionLayer.zRotation = 0
+        reactionLayer.setScale(1)
     }
 
     private func rebuild() {
         removeAllChildren()
+        reactionLayer.removeAllChildren()
+        poseLayer.removeAllChildren()
+        reactionLayer.position = .zero
+        reactionLayer.zRotation = 0
+        reactionLayer.setScale(1)
+        poseLayer.position = .zero
+        poseLayer.zRotation = 0
+        poseLayer.xScale = facingDirection
+        poseLayer.yScale = 1
+        flowEffect = nil
 
-        // The playable character uses the same adult-hen illustration as the
-        // shell, so the run never falls back to a generic bird or a chick.
-        if UIImage(named: "TravelerChickenSprite") != nil {
-            let shadow = ChickenArtwork.ellipse(
-                size: CGSize(width: 54, height: 12),
-                fill: UIColor.black.withAlphaComponent(0.12)
-            )
-            shadow.position = CGPoint(x: -2, y: -47)
-            shadow.zPosition = -8
-            addChild(shadow)
+        reactionLayer.addChild(poseLayer)
+        addChild(reactionLayer)
 
-            let hen = SKSpriteNode(imageNamed: "TravelerChickenSprite")
+        // Flight uses the surprised expression while the surrounding shell
+        // keeps the same character with a calm, neutral face.
+        if UIImage(named: "TravelerChickenFlightSprite") != nil {
+            let hen = SKSpriteNode(imageNamed: "TravelerChickenFlightSprite")
             hen.name = "art.adultHen"
-            hen.size = CGSize(width: 74, height: 132)
-            hen.position = CGPoint(x: 0, y: 6)
+            hen.size = CGSize(width: 142, height: 142)
+            // The simulation point sits 18 pt above the cloud. Aligning the
+            // image's feet to that point keeps the larger art readable without
+            // altering the deterministic collision radius.
+            hen.position = CGPoint(x: 0, y: 38)
             hen.zPosition = 2
             hen.color = appearance.plumageTint ?? .white
             hen.colorBlendFactor = appearance.plumageTint == nil ? 0 : 0.06
-            addChild(hen)
+            poseLayer.addChild(hen)
 
-            let newFlowEffect = ChickenArtwork.makeFlowEffect(radius: 56)
+            let newFlowEffect = ChickenArtwork.makeFlowEffect(radius: 72)
+            newFlowEffect.position = CGPoint(x: 0, y: 38)
             newFlowEffect.zPosition = -5
             newFlowEffect.alpha = 0
-            addChild(newFlowEffect)
+            poseLayer.addChild(newFlowEffect)
             flowEffect = newFlowEffect
             return
         }
@@ -190,7 +307,7 @@ final class ChickenArtNode: SKNode {
         )
         shadow.position = CGPoint(x: -1, y: -28)
         shadow.zPosition = -8
-        addChild(shadow)
+        poseLayer.addChild(shadow)
 
         let tail = SKNode()
         tail.zPosition = -2
@@ -205,7 +322,7 @@ final class ChickenArtNode: SKNode {
             node.zRotation = feather.2
             tail.addChild(node)
         }
-        addChild(tail)
+        poseLayer.addChild(tail)
 
         if let backpackTint = appearance.backpackTint {
             let backpack = SKNode()
@@ -242,7 +359,7 @@ final class ChickenArtNode: SKNode {
                 controlPoint2: CGPoint(x: -4, y: -2)
             )
             backpack.addChild(ChickenArtwork.line(path: strapPath, color: packOutline.withAlphaComponent(0.72), width: 2.2))
-            addChild(backpack)
+            poseLayer.addChild(backpack)
         }
 
         let legs = SKNode()
@@ -254,7 +371,7 @@ final class ChickenArtNode: SKNode {
             legPath.addLine(to: CGPoint(x: x + 3.5, y: -29))
             legs.addChild(ChickenArtwork.line(path: legPath, color: UIColor(red: 0.83, green: 0.46, blue: 0.18, alpha: 1), width: 2.1))
         }
-        addChild(legs)
+        poseLayer.addChild(legs)
 
         plumageLayer = SKNode()
         plumageLayer.zPosition = 2
@@ -293,7 +410,7 @@ final class ChickenArtNode: SKNode {
         cheek.zPosition = 4
         plumageLayer.addChild(cheek)
 
-        addChild(plumageLayer)
+        poseLayer.addChild(plumageLayer)
 
         wingLayer = SKNode()
         wingLayer.zPosition = 5
@@ -314,7 +431,7 @@ final class ChickenArtNode: SKNode {
         wingTip.position = CGPoint(x: 10, y: -9)
         wingTip.zRotation = -0.31
         wingLayer.addChild(wingTip)
-        addChild(wingLayer)
+        poseLayer.addChild(wingLayer)
 
         let face = SKNode()
         face.zPosition = 8
@@ -338,7 +455,7 @@ final class ChickenArtNode: SKNode {
             comb.position = point
             face.addChild(comb)
         }
-        addChild(face)
+        poseLayer.addChild(face)
 
         accessoryLayer = SKNode()
         accessoryLayer.zPosition = 12
@@ -370,12 +487,12 @@ final class ChickenArtNode: SKNode {
         talisman.position = CGPoint(x: -19, y: -5)
         talisman.zRotation = -0.66
         accessoryLayer.addChild(talisman)
-        addChild(accessoryLayer)
+        poseLayer.addChild(accessoryLayer)
 
         let newFlowEffect = ChickenArtwork.makeFlowEffect(radius: 40)
         newFlowEffect.zPosition = -5
         newFlowEffect.alpha = 0
-        addChild(newFlowEffect)
+        poseLayer.addChild(newFlowEffect)
         flowEffect = newFlowEffect
     }
 }
@@ -715,6 +832,249 @@ final class FeatherCollectibleNode: SKNode {
             actions.append(.removeFromParent())
         }
         run(.sequence(actions), withKey: "art.featherCollect")
+    }
+}
+
+@MainActor
+final class FloatingRewardNode: SKNode {
+    private let tint: UIColor
+    private let emphasized: Bool
+
+    init(text: String, tint: UIColor, emphasized: Bool = false) {
+        self.tint = tint
+        self.emphasized = emphasized
+        super.init()
+        name = "art.floatingReward"
+        build(text: text)
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        nil
+    }
+
+    func playAndRemove(reducedMotion: Bool = false) {
+        removeAllActions()
+
+        if reducedMotion {
+            alpha = 1
+            run(.sequence([
+                .group([
+                    .moveBy(x: 0, y: 16, duration: 0.22),
+                    .fadeOut(withDuration: 0.22)
+                ]),
+                .removeFromParent()
+            ]))
+            return
+        }
+
+        alpha = 0
+        setScale(emphasized ? 0.62 : 0.72)
+        let appear = SKAction.group([
+            .fadeIn(withDuration: 0.07),
+            .scale(to: emphasized ? 1.16 : 1.10, duration: 0.09)
+        ])
+        let settle = SKAction.scale(to: 1, duration: 0.08)
+        let floatAway = SKAction.group([
+            .moveBy(x: 0, y: emphasized ? 58 : 44, duration: emphasized ? 0.56 : 0.46),
+            .fadeOut(withDuration: emphasized ? 0.56 : 0.46)
+        ])
+        run(.sequence([appear, settle, .wait(forDuration: 0.12), floatAway, .removeFromParent()]))
+    }
+
+    private func build(text: String) {
+        let shadow = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        shadow.text = text
+        shadow.fontSize = emphasized ? 23 : 20
+        shadow.fontColor = UIColor.black.withAlphaComponent(0.30)
+        shadow.horizontalAlignmentMode = .center
+        shadow.verticalAlignmentMode = .center
+        shadow.position = CGPoint(x: 1.5, y: -1.5)
+        shadow.zPosition = 0
+        addChild(shadow)
+
+        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        label.text = text
+        label.fontSize = emphasized ? 23 : 20
+        label.fontColor = tint
+        label.horizontalAlignmentMode = .center
+        label.verticalAlignmentMode = .center
+        label.zPosition = 1
+        addChild(label)
+
+        let sparkleOffsets: [CGPoint] = emphasized
+            ? [CGPoint(x: -52, y: 4), CGPoint(x: 49, y: 10), CGPoint(x: -40, y: -13), CGPoint(x: 38, y: -12)]
+            : [CGPoint(x: -24, y: 7), CGPoint(x: 24, y: -5)]
+        for (index, offset) in sparkleOffsets.enumerated() {
+            let sparkle = ChickenArtwork.ellipse(
+                size: CGSize(width: index.isMultiple(of: 2) ? 5 : 3.5, height: index.isMultiple(of: 2) ? 5 : 3.5),
+                fill: tint.withAlphaComponent(0.88)
+            )
+            sparkle.position = offset
+            sparkle.zPosition = 2
+            addChild(sparkle)
+        }
+    }
+}
+
+@MainActor
+final class LandingBurstNode: SKNode {
+    private let family: CloudFamily
+    private let intensity: CGFloat
+
+    init(family: CloudFamily, intensity: CGFloat = 1) {
+        self.family = family
+        self.intensity = min(max(intensity, 0.75), 1.35)
+        super.init()
+        name = "art.landingBurst"
+        build()
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        nil
+    }
+
+    func playAndRemove(reducedMotion: Bool = false) {
+        removeAllActions()
+
+        if reducedMotion {
+            alpha = 0.72
+            run(.sequence([.fadeOut(withDuration: 0.16), .removeFromParent()]))
+            return
+        }
+
+        setScale(0.68)
+        alpha = 1
+        let spread = SKAction.group([
+            .scaleX(to: 1.30 * intensity, y: 1.18 * intensity, duration: 0.30),
+            .fadeOut(withDuration: 0.30)
+        ])
+        run(.sequence([spread, .removeFromParent()]), withKey: "art.landingBurstRemove")
+    }
+
+    private func build() {
+        let tint = burstTint
+        let width = 72 * intensity
+
+        let ring = SKShapeNode(ellipseOf: CGSize(width: width, height: 15 * intensity))
+        ring.fillColor = .clear
+        ring.strokeColor = tint.withAlphaComponent(0.90)
+        ring.lineWidth = family == .spring ? 3 : 2.2
+        ring.glowWidth = family == .storm ? 5 : 2
+        ring.zPosition = 1
+        addChild(ring)
+
+        for index in 0..<7 {
+            let unit = CGFloat(index) / 6
+            let x = (unit - 0.5) * width * 0.88
+            let puff = ChickenArtwork.ellipse(
+                size: CGSize(width: 11 + CGFloat(index % 3) * 3, height: 6 + CGFloat(index % 2) * 2),
+                fill: tint.withAlphaComponent(index.isMultiple(of: 2) ? 0.82 : 0.58)
+            )
+            puff.position = CGPoint(x: x, y: 3 + CGFloat(index % 2) * 2)
+            puff.zPosition = 2
+            addChild(puff)
+        }
+
+        for direction in [-1.0, -0.48, 0.48, 1.0] {
+            let linePath = UIBezierPath()
+            let x = CGFloat(direction) * width * 0.30
+            linePath.move(to: CGPoint(x: x * 0.52, y: 4))
+            linePath.addLine(to: CGPoint(x: x, y: 16 + 8 * intensity))
+            let streak = ChickenArtwork.line(
+                path: linePath,
+                color: tint.withAlphaComponent(0.88),
+                width: family == .spring ? 3 : 2
+            )
+            streak.zPosition = 3
+            addChild(streak)
+        }
+
+        if family == .storm {
+            let boltPath = UIBezierPath()
+            boltPath.move(to: CGPoint(x: 4, y: 32))
+            boltPath.addLine(to: CGPoint(x: -5, y: 13))
+            boltPath.addLine(to: CGPoint(x: 1, y: 13))
+            boltPath.addLine(to: CGPoint(x: -4, y: -2))
+            boltPath.addLine(to: CGPoint(x: 11, y: 18))
+            boltPath.addLine(to: CGPoint(x: 4, y: 18))
+            boltPath.close()
+            let bolt = ChickenArtwork.shape(
+                path: boltPath,
+                fill: tint,
+                stroke: UIColor.white.withAlphaComponent(0.88),
+                lineWidth: 1.2
+            )
+            bolt.zPosition = 5
+            addChild(bolt)
+        }
+    }
+
+    private var burstTint: UIColor {
+        switch family {
+        case .fluffy:
+            return UIColor.white
+        case .windy:
+            return UIColor(red: 0.48, green: 0.91, blue: 1, alpha: 1)
+        case .spring:
+            return UIColor(red: 0.80, green: 0.62, blue: 1, alpha: 1)
+        case .storm:
+            return UIColor(red: 1, green: 0.86, blue: 0.28, alpha: 1)
+        }
+    }
+}
+
+@MainActor
+final class ActionBurstNode: SKNode {
+    private let tint: UIColor
+    private let direction: CGFloat
+
+    init(tint: UIColor, direction: CGFloat = 0) {
+        self.tint = tint
+        self.direction = min(max(direction, -1), 1)
+        super.init()
+        name = "art.actionBurst"
+        build()
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        nil
+    }
+
+    func playAndRemove(reducedMotion: Bool = false) {
+        removeAllActions()
+        if reducedMotion {
+            run(.sequence([.fadeOut(withDuration: 0.14), .removeFromParent()]))
+            return
+        }
+
+        setScale(0.55)
+        let burst = SKAction.group([
+            .scale(to: 1.35, duration: 0.26),
+            .fadeOut(withDuration: 0.26)
+        ])
+        run(.sequence([burst, .removeFromParent()]), withKey: "art.actionBurstRemove")
+    }
+
+    private func build() {
+        let ring = SKShapeNode(ellipseOf: CGSize(width: 72, height: 46))
+        ring.fillColor = .clear
+        ring.strokeColor = tint.withAlphaComponent(0.72)
+        ring.lineWidth = 2.4
+        ring.glowWidth = 3
+        addChild(ring)
+
+        for index in 0..<8 {
+            let angle = CGFloat(index) / 8 * .pi * 2
+            let directionalPush = direction == 0 ? 0 : direction * 8
+            let start = CGPoint(x: cos(angle) * 24 - directionalPush, y: sin(angle) * 15)
+            let end = CGPoint(x: cos(angle) * 43 + directionalPush, y: sin(angle) * 30)
+            let path = UIBezierPath()
+            path.move(to: start)
+            path.addLine(to: end)
+            let ray = ChickenArtwork.line(path: path, color: tint.withAlphaComponent(0.84), width: 2)
+            ray.zPosition = 2
+            addChild(ray)
+        }
     }
 }
 
