@@ -2,33 +2,56 @@
 //  ContentView.swift
 //  ChickenRun
 //
-//  Created by Nikita on 21.07.2026.
-//
 
 import SwiftUI
 
+@MainActor
 struct ContentView: View {
-    @StateObject private var store = GameStore()
-    @AppStorage("com.any.chickenrun.has-completed-onboarding") private var hasCompletedOnboarding = false
+    @State private var launchCoordinator: AppLaunchCoordinator
+
+    init() {
+        _launchCoordinator = State(initialValue: AppLaunchCoordinator())
+    }
 
     var body: some View {
-        Group {
-            if hasCompletedOnboarding {
-                ZStack {
-                    AppShellView(store: store)
-
-                    if store.isPresentingGame {
-                        GameContainerView(store: store)
-                            .transition(.opacity)
-                            .zIndex(1)
+        ZStack {
+            switch launchCoordinator.route {
+            case .loading(let message):
+                LaunchSplashView(message: message)
+                    .transition(.opacity)
+            case .noInternet(let message):
+                NoInternetView(message: message) {
+                    launchCoordinator.retry()
+                }
+                .transition(.opacity)
+            case .fanContent:
+                ChickenRunFanContentView()
+                    .transition(.opacity)
+                    .onAppear {
+                        AppDelegate.lockGameOrientation()
                     }
-                }
-                .animation(.easeInOut(duration: 0.22), value: store.isPresentingGame)
-            } else {
-                OnboardingView {
-                    hasCompletedOnboarding = true
-                }
+                    .onDisappear {
+                        AppDelegate.restoreDefaultOrientations()
+                    }
+            case .notificationPrompt:
+                NotificationOptInView(
+                    allowAction: {
+                        launchCoordinator.acceptNotifications()
+                    },
+                    skipAction: {
+                        launchCoordinator.skipNotifications()
+                    }
+                )
+                .transition(.opacity)
+            case .webView(let request):
+                RoadToHeavenWebView(url: request.url, requestID: request.id)
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
+                    .preferredColorScheme(.dark)
             }
+        }
+        .task {
+            AppDelegate.startAppsFlyerForLaunch()
+            await launchCoordinator.start()
         }
     }
 }

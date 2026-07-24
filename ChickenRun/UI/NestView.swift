@@ -155,10 +155,10 @@ struct NestView: View {
                     )
                     SettingsDivider()
                     SettingsLinkRow(
-                        symbolName: "doc.text.fill",
-                        title: "Terms of Use",
-                        detail: "Rules for using Chicken Run",
-                        destination: AppLinks.termsOfUseURL
+                        symbolName: "questionmark.circle.fill",
+                        title: "Support",
+                        detail: "Get help with Road to Heaven:Luetti",
+                        destination: AppLinks.supportURL
                     )
                 }
             }
