@@ -1,27 +1,21 @@
+import AppsFlyerLib
+import FirebaseCore
+import FirebaseMessaging
 import UIKit
 import UserNotifications
-
-#if canImport(AppsFlyerLib)
-import AppsFlyerLib
-#endif
-
-#if canImport(FirebaseCore)
-import FirebaseCore
-#endif
-
-#if canImport(FirebaseMessaging)
-import FirebaseMessaging
-#endif
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
     private static weak var shared: AppDelegate?
     private static var didConfigureFirebase = false
-    private var didStartAppsFlyer = false
-    private var handledNotificationResponseKeys = Set<String>()
+    private var lastAppsFlyerStartAt: Date?
+    private var lastIncomingURLReplayAt: Date?
+    private var lastReplayedIncomingURL: URL?
+    private var didConfigureAppsFlyer = false
     private var supportedOrientationMask = AppDelegate.defaultSupportedOrientationMask
+    private var handledNotificationResponseKeys = Set<String>()
 
     override init() {
-        _ = Self.configureFirebaseIfNeeded()
+        Self.configureFirebaseIfNeeded()
         super.init()
         Self.shared = self
     }
@@ -30,22 +24,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        let firebaseConfigured = Self.configureFirebaseIfNeeded()
+        let firebaseIsConfigured = Self.configureFirebaseIfNeeded()
 
-        #if canImport(FirebaseMessaging)
-        if firebaseConfigured {
+        if firebaseIsConfigured {
             Messaging.messaging().delegate = self
         }
-        #endif
-
         UNUserNotificationCenter.current().delegate = self
         configureAppsFlyer()
         logPush(
             "did-finish-launching",
             details: [
                 "launchOptionsKeys=\(Self.launchOptionKeysDescription(launchOptions))",
-                "hasRemoteNotification=\(launchOptions?[.remoteNotification] != nil)",
-                "firebaseConfigured=\(firebaseConfigured)"
+                "hasRemoteNotification=\(launchOptions?[.remoteNotification] != nil)"
             ]
         )
         handleLaunchNotificationIfNeeded(launchOptions)
@@ -76,23 +66,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         supportedOrientationMask
     }
 
+    @discardableResult
     private static func configureFirebaseIfNeeded() -> Bool {
-        #if canImport(FirebaseCore)
+        if FirebaseApp.app() != nil {
+            didConfigureFirebase = true
+            return true
+        }
+
+        guard !didConfigureFirebase else { return false }
         guard AppConfiguration.hasFirebaseConfiguration else {
-            debugLog("Firebase configuration skipped: target GoogleService-Info.plist is unavailable.")
+            #if DEBUG
+            NSLog("%@", "[RoadToHeavenPush] | AppDelegate | firebase-configuration-unavailable")
+            #endif
             return false
         }
 
-        guard !didConfigureFirebase else { return true }
-
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
+        FirebaseApp.configure()
         didConfigureFirebase = true
-        return true
-        #else
-        return false
-        #endif
+        return FirebaseApp.app() != nil
     }
 
     @MainActor
@@ -150,18 +141,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             "did-register-apns-token",
             details: ["token=\(Self.redactedDeviceToken(deviceToken))"]
         )
-
-        #if canImport(FirebaseMessaging)
-        if AppConfiguration.hasFirebaseConfiguration {
+        if Self.didConfigureFirebase {
             Messaging.messaging().apnsToken = deviceToken
         }
-        #endif
-
-        #if canImport(AppsFlyerLib)
-        if AppConfiguration.appsFlyerDevKey != nil {
+        if didConfigureAppsFlyer {
             AppsFlyerLib.shared().registerUninstall(deviceToken)
         }
-        #endif
     }
 
     func application(
@@ -170,7 +155,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
         logPush("did-receive-remote-notification-fetch", userInfo: userInfo)
-        forwardPushToAppsFlyer(userInfo)
+        if didConfigureAppsFlyer {
+            AppsFlyerLib.shared().handlePushNotification(userInfo)
+        }
+
         completionHandler(.noData)
     }
 
@@ -197,12 +185,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         )
     }
 
+    @MainActor
     private func continueAppsFlyerUserActivity(
         _ userActivity: NSUserActivity,
         source: String
     ) -> Bool {
-        #if canImport(AppsFlyerLib)
-        guard AppConfiguration.appsFlyerDevKey != nil else {
+        if let url = userActivity.webpageURL {
+            AttributionService.shared.recordIncomingURL(url)
+        }
+
+        guard didConfigureAppsFlyer else {
             logDeepLink(
                 "continue-user-activity-skip",
                 source: source,
@@ -219,24 +211,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         )
         AppsFlyerLib.shared().continue(userActivity, restorationHandler: nil)
         return true
-        #else
-        logDeepLink(
-            "continue-user-activity-skip",
-            source: source,
-            url: userActivity.webpageURL,
-            details: ["reason=sdk-not-linked"]
-        )
-        return false
-        #endif
     }
 
+    @MainActor
     private func handleAppsFlyerOpenURL(
         _ url: URL,
         options: [UIApplication.OpenURLOptionsKey: Any],
         source: String
     ) -> Bool {
-        #if canImport(AppsFlyerLib)
-        guard AppConfiguration.appsFlyerDevKey != nil else {
+        AttributionService.shared.recordIncomingURL(url)
+
+        guard didConfigureAppsFlyer else {
             logDeepLink(
                 "open-url-skip",
                 source: source,
@@ -249,36 +234,29 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         logDeepLink("open-url", source: source, url: url)
         AppsFlyerLib.shared().handleOpen(url, options: options)
         return true
-        #else
-        logDeepLink(
-            "open-url-skip",
-            source: source,
-            url: url,
-            details: ["reason=sdk-not-linked"]
-        )
-        return false
-        #endif
     }
 
     private func configureAppsFlyer() {
-        #if canImport(AppsFlyerLib)
-        guard let devKey = AppConfiguration.appsFlyerDevKey else {
-            logPush("appsflyer-configuration-skipped", details: ["reason=missing-target-dev-key"])
+        guard
+            let appsFlyerDevKey = AppConfiguration.appsFlyerDevKey,
+            let appleAppID = AppConfiguration.appleAppID
+        else {
+            #if DEBUG
+            NSLog("%@", "[RoadToHeavenAttribution] | AppDelegate | appsflyer-configuration-unavailable")
+            #endif
             return
         }
 
         let appsFlyer = AppsFlyerLib.shared()
-        appsFlyer.appsFlyerDevKey = devKey
-        appsFlyer.appleAppID = AppConfiguration.appleAppID
+        appsFlyer.appsFlyerDevKey = appsFlyerDevKey
+        appsFlyer.appleAppID = appleAppID
         appsFlyer.delegate = self
         appsFlyer.deepLinkDelegate = self
+        didConfigureAppsFlyer = true
         registerAppsFlyerIDProvider()
 
         #if DEBUG
         appsFlyer.isDebug = true
-        #endif
-        #else
-        logPush("appsflyer-configuration-skipped", details: ["reason=sdk-not-linked"])
         #endif
     }
 
@@ -300,7 +278,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     @MainActor
     private func handleNotificationOpen(_ userInfo: [AnyHashable: Any]) {
         logPush("notification-open-received", userInfo: userInfo)
-        forwardPushToAppsFlyer(userInfo)
+        if didConfigureAppsFlyer {
+            AppsFlyerLib.shared().handlePushNotification(userInfo)
+        }
 
         guard let url = PushNotificationService.notificationURL(from: userInfo) else {
             logPush("notification-open-no-http-url", userInfo: userInfo)
@@ -308,7 +288,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         }
 
         logPush("notification-open-url-selected", details: ["url=\(url.absoluteString)"])
-
         PushNotificationService.shared.openNotificationURL(url)
     }
 
@@ -349,31 +328,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     @MainActor
     private func handleDidBecomeActive(source: String) {
         logPush("did-become-active", details: ["source=\(source)"])
-        startAppsFlyerOnce()
+        startAppsFlyer(source: source, replayIncomingURL: true)
         PushNotificationService.shared.deliverPendingNotificationURLIfPossible(source: source)
-    }
-
-    private func forwardPushToAppsFlyer(_ userInfo: [AnyHashable: Any]) {
-        #if canImport(AppsFlyerLib)
-        if AppConfiguration.appsFlyerDevKey != nil {
-            AppsFlyerLib.shared().handlePushNotification(userInfo)
-        }
-        #endif
-    }
-
-    private func registerAppsFlyerIDProvider() {
-        #if canImport(AppsFlyerLib)
-        Task { @MainActor in
-            AttributionService.shared.setAppsFlyerIDProvider {
-                AppsFlyerLib.shared().getAppsFlyerUID()
-            }
-        }
-        #endif
-    }
-
-    @MainActor
-    static func startAppsFlyerForLaunch() {
-        shared?.startAppsFlyerOnce()
     }
 
     @MainActor
@@ -403,21 +359,86 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         shared?.handleDidBecomeActive(source: "scene-did-become-active")
     }
 
-    @MainActor
-    private func startAppsFlyerOnce() {
-        guard !didStartAppsFlyer else { return }
-
-        #if canImport(AppsFlyerLib)
-        guard AppConfiguration.appsFlyerDevKey != nil else { return }
-
-        didStartAppsFlyer = true
-        AppsFlyerLib.shared().start()
-
-        let appsFlyerID = AppsFlyerLib.shared().getAppsFlyerUID()
+    private func registerAppsFlyerIDProvider() {
         Task { @MainActor in
-            AttributionService.shared.recordAppsFlyerID(appsFlyerID)
+            AttributionService.shared.setAppsFlyerIDProvider {
+                AppsFlyerLib.shared().getAppsFlyerUID()
+            }
         }
-        #endif
+    }
+
+    @MainActor
+    static func startAppsFlyerForLaunch() {
+        shared?.startAppsFlyer(source: "app-root-launch", replayIncomingURL: true)
+    }
+
+    @MainActor
+    static func refreshAppsFlyerAttribution(source: String) {
+        shared?.startAppsFlyer(source: source, replayIncomingURL: true)
+    }
+
+    @MainActor
+    private func startAppsFlyer(source: String, replayIncomingURL: Bool) {
+        guard didConfigureAppsFlyer else {
+            logDeepLink(
+                "appsflyer-start-skip",
+                source: source,
+                url: nil,
+                details: ["reason=appsflyer-not-configured"]
+            )
+            return
+        }
+
+        let now = Date()
+        let shouldStart = lastAppsFlyerStartAt.map {
+            now.timeIntervalSince($0) >= 1
+        } ?? true
+
+        if shouldStart {
+            lastAppsFlyerStartAt = now
+            AppsFlyerLib.shared().start()
+            AttributionService.shared.recordAppsFlyerID(
+                AppsFlyerLib.shared().getAppsFlyerUID()
+            )
+            logDeepLink(
+                "appsflyer-start",
+                source: source,
+                url: nil,
+                details: ["replayIncomingURL=\(replayIncomingURL)"]
+            )
+        } else {
+            logDeepLink(
+                "appsflyer-start-deduplicated",
+                source: source,
+                url: nil
+            )
+        }
+
+        if
+            replayIncomingURL,
+            let incomingURL = AttributionService.shared.latestIncomingURL,
+            shouldReplayIncomingURL(incomingURL, now: now)
+        {
+            lastIncomingURLReplayAt = now
+            lastReplayedIncomingURL = incomingURL
+            AppsFlyerLib.shared().performOnAppAttribution(with: incomingURL)
+            logDeepLink(
+                "appsflyer-incoming-url-replayed",
+                source: source,
+                url: incomingURL
+            )
+        }
+    }
+
+    private func shouldReplayIncomingURL(_ url: URL, now: Date) -> Bool {
+        guard
+            lastReplayedIncomingURL == url,
+            let lastIncomingURLReplayAt
+        else {
+            return true
+        }
+
+        return now.timeIntervalSince(lastIncomingURLReplayAt) >= 1
     }
 
     private func logPush(
@@ -454,42 +475,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             "AppDelegate",
             event,
             "source=\(source)",
-            "url=\(url?.absoluteString ?? "nil")"
+            "urlHost=\(url?.host ?? "nil")",
+            "urlPath=\(url?.path ?? "nil")",
+            "queryKeys=\(Self.queryKeysDescription(url))"
         ]
         components.append(contentsOf: details)
         NSLog("%@", components.joined(separator: " | "))
         #endif
-    }
-
-    private static func debugLog(_ message: String) {
-        #if DEBUG
-        NSLog("[RoadToHeavenPush] %@", message)
-        #endif
-    }
-
-    nonisolated private static func launchOptionKeysDescription(
-        _ launchOptions: [UIApplication.LaunchOptionsKey: Any]?
-    ) -> String {
-        guard let launchOptions, !launchOptions.isEmpty else { return "none" }
-
-        return launchOptions.keys
-            .map(\.rawValue)
-            .sorted()
-            .joined(separator: ",")
-    }
-
-    nonisolated private static func payloadKeysDescription(_ userInfo: [AnyHashable: Any]) -> String {
-        userInfo.keys
-            .map { String(describing: $0) }
-            .sorted()
-            .joined(separator: ",")
-    }
-
-    nonisolated private static func redactedDeviceToken(_ data: Data) -> String {
-        let token = data.map { String(format: "%02x", $0) }.joined()
-        guard token.count > 12 else { return "length=\(token.count)" }
-
-        return "\(token.prefix(6))...\(token.suffix(6)) length=\(token.count)"
     }
 
     @MainActor
@@ -512,33 +504,107 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
         return options
     }
+
+    nonisolated private static func launchOptionKeysDescription(
+        _ launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> String {
+        guard let launchOptions, !launchOptions.isEmpty else { return "none" }
+
+        return launchOptions.keys
+            .map(\.rawValue)
+            .sorted()
+            .joined(separator: ",")
+    }
+
+    nonisolated private static func payloadKeysDescription(_ userInfo: [AnyHashable: Any]) -> String {
+        userInfo.keys
+            .map { String(describing: $0) }
+            .sorted()
+            .joined(separator: ",")
+    }
+
+    nonisolated private static func queryKeysDescription(_ url: URL?) -> String {
+        guard let url else { return "none" }
+
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .map(\.name)
+            .sorted()
+            .joined(separator: ",") ?? "none"
+    }
+
+    nonisolated private static func redactedDeviceToken(_ data: Data) -> String {
+        let token = data.map { String(format: "%02x", $0) }.joined()
+        guard token.count > 12 else { return "length=\(token.count)" }
+
+        return "\(token.prefix(6))...\(token.suffix(6)) length=\(token.count)"
+    }
 }
 
-#if canImport(AppsFlyerLib)
 extension AppDelegate: AppsFlyerLibDelegate {
     func onConversionDataSuccess(_ installData: [AnyHashable: Any]) {
+        logDeepLink(
+            "conversion-success",
+            source: "appsflyer-callback",
+            url: nil,
+            details: ["payloadKeys=\(Self.payloadKeysDescription(installData))"]
+        )
         Task { @MainActor in
             AttributionService.shared.recordConversionData(installData)
         }
     }
 
     func onConversionDataFail(_ error: Error) {
+        let nsError = error as NSError
+        logDeepLink(
+            "conversion-failure",
+            source: "appsflyer-callback",
+            url: nil,
+            details: [
+                "errorDomain=\(nsError.domain)",
+                "errorCode=\(nsError.code)"
+            ]
+        )
         Task { @MainActor in
             AttributionService.shared.recordConversionFailure()
         }
     }
 
     func onAppOpenAttribution(_ attributionData: [AnyHashable: Any]) {
+        logDeepLink(
+            "app-open-attribution",
+            source: "appsflyer-callback",
+            url: nil,
+            details: ["payloadKeys=\(Self.payloadKeysDescription(attributionData))"]
+        )
         Task { @MainActor in
             AttributionService.shared.recordDeepLinkData(attributionData)
         }
     }
 
-    func onAppOpenAttributionFailure(_ error: Error) { }
+    func onAppOpenAttributionFailure(_ error: Error) {
+        let nsError = error as NSError
+        logDeepLink(
+            "app-open-attribution-failure",
+            source: "appsflyer-callback",
+            url: nil,
+            details: [
+                "errorDomain=\(nsError.domain)",
+                "errorCode=\(nsError.code)"
+            ]
+        )
+    }
 }
 
 extension AppDelegate: DeepLinkDelegate {
     func didResolveDeepLink(_ result: DeepLinkResult) {
+        logDeepLink(
+            "deep-link-resolution",
+            source: "appsflyer-callback",
+            url: nil,
+            details: ["status=\(String(describing: result.status))"]
+        )
+
         guard result.status == .found, let deepLink = result.deepLink else { return }
 
         var data = deepLink.clickEvent
@@ -551,9 +617,7 @@ extension AppDelegate: DeepLinkDelegate {
         }
     }
 }
-#endif
 
-#if canImport(FirebaseMessaging)
 extension AppDelegate: MessagingDelegate {
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         logPush(
@@ -565,7 +629,6 @@ extension AppDelegate: MessagingDelegate {
         }
     }
 }
-#endif
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
     func userNotificationCenter(
@@ -589,13 +652,10 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        Task { @MainActor in
-            self.handleNotificationResponse(
-                response,
-                source: "user-notification-center"
-            )
+        Task { @MainActor [weak self] in
+            self?.handleNotificationResponse(response, source: "notification-center-delegate")
+            completionHandler()
         }
-        completionHandler()
     }
 }
 

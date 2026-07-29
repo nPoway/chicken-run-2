@@ -38,7 +38,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             details: ["requestID=\(requestID.uuidString)"]
         )
         context.coordinator.resetHTTPUpgradeAttempts()
-        let request = URLRequest(url: url)
+        let request = Self.freshNavigationRequest(for: url)
         context.coordinator.prepareForExplicitNavigation(request, in: webView)
         webView.load(request)
         context.coordinator.loadedURL = url
@@ -85,7 +85,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             ]
         )
         context.coordinator.resetHTTPUpgradeAttempts()
-        let request = URLRequest(url: url)
+        let request = Self.freshNavigationRequest(for: url)
         context.coordinator.prepareForExplicitNavigation(request, in: webView)
         webView.load(request)
         context.coordinator.loadedURL = url
@@ -95,6 +95,13 @@ struct RoadToHeavenWebView: UIViewRepresentable {
     private static var userAgent: String {
         let systemVersion = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
         return "Mozilla/5.0 (iPhone; CPU iPhone OS \(systemVersion) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    }
+
+    private static func freshNavigationRequest(for url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        return request
     }
 
     private static let diagnosticsHandlerName = "duperDiagnostics"
@@ -399,7 +406,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
         }
 
         #if DEBUG
-        private static func compactLogComponent(_ value: String) -> String {
+        nonisolated private static func compactLogComponent(_ value: String) -> String {
             guard value.count > 600 else { return value }
             return "\(value.prefix(600))..."
         }

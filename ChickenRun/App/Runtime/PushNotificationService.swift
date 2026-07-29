@@ -1,10 +1,8 @@
+import FirebaseCore
+import FirebaseMessaging
 import Foundation
 import UIKit
 import UserNotifications
-
-#if canImport(FirebaseMessaging)
-import FirebaseMessaging
-#endif
 
 @MainActor
 final class PushNotificationService {
@@ -38,32 +36,58 @@ final class PushNotificationService {
     }
 
     func openNotificationURL(_ url: URL) {
+        guard UIApplication.shared.applicationState == .active else {
+            Self.logPush(
+                "open-notification-url-store-pending",
+                details: [
+                    "url=\(url.absoluteString)",
+                    "reason=app-not-active",
+                    "appState=\(Self.applicationStateDescription())"
+                ]
+            )
+            pendingNotificationURL = url
+            schedulePendingNotificationDeliveryRetry(reason: "app-not-active")
+            return
+        }
+
         if let notificationURLHandler {
             Self.logPush(
-                "open-notification-url-deliver-to-handler",
+                "open-notification-url-deliver-immediate",
                 details: [
                     "url=\(url.absoluteString)",
                     "appState=\(Self.applicationStateDescription())"
                 ]
             )
             notificationURLHandler(url)
-            return
+        } else {
+            Self.logPush(
+                "open-notification-url-store-pending",
+                details: [
+                    "url=\(url.absoluteString)",
+                    "reason=no-handler",
+                    "appState=\(Self.applicationStateDescription())"
+                ]
+            )
+            pendingNotificationURL = url
+            schedulePendingNotificationDeliveryRetry(reason: "no-handler")
         }
-
-        Self.logPush(
-            "open-notification-url-store-pending",
-            details: [
-                "url=\(url.absoluteString)",
-                "reason=no-handler",
-                "appState=\(Self.applicationStateDescription())"
-            ]
-        )
-        pendingNotificationURL = url
-        schedulePendingNotificationDeliveryRetry(reason: "no-handler")
     }
 
     @discardableResult
     func deliverPendingNotificationURLIfPossible(source: String = "direct") -> Bool {
+        guard UIApplication.shared.applicationState == .active else {
+            Self.logPush(
+                "deliver-pending-notification-url-skip",
+                details: [
+                    "source=\(source)",
+                    "reason=app-not-active",
+                    "appState=\(Self.applicationStateDescription())",
+                    "url=\(pendingNotificationURL?.absoluteString ?? "nil")"
+                ]
+            )
+            return false
+        }
+
         guard let notificationURLHandler else {
             Self.logPush(
                 "deliver-pending-notification-url-skip",
@@ -158,11 +182,11 @@ final class PushNotificationService {
     }
 
     func refreshFCMToken() async {
-        guard AppConfiguration.hasFirebaseConfiguration else {
+        guard FirebaseApp.app() != nil else {
+            Self.logPush("fcm-token-refresh-skip", details: ["reason=firebase-not-configured"])
             return
         }
 
-        #if canImport(FirebaseMessaging)
         await withCheckedContinuation { continuation in
             Messaging.messaging().token { token, _ in
                 Task { @MainActor in
@@ -171,7 +195,6 @@ final class PushNotificationService {
                 }
             }
         }
-        #endif
     }
 
     nonisolated static func notificationURL(

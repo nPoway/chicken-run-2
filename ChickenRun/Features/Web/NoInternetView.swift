@@ -71,7 +71,7 @@ struct NoInternetView: View {
 
     private var messageBlock: some View {
         VStack(spacing: 8) {
-            Text("Connection paused")
+            Text("Unable to connect")
                 .font(.system(.title2, design: .rounded, weight: .bold))
                 .foregroundStyle(ChickenTheme.ink)
                 .multilineTextAlignment(.center)
@@ -86,10 +86,10 @@ struct NoInternetView: View {
 
     private var retryButton: some View {
         Button(action: retryAction) {
-            Label("Retry connection", systemImage: "arrow.clockwise")
+            Label("Try Again", systemImage: "arrow.clockwise")
         }
         .buttonStyle(ChickenNoInternetButtonStyle())
-        .accessibilityHint("Attempts to reconnect and continue launching Road to Heaven")
+        .accessibilityHint("Checks the internet connection and tries again")
     }
 }
 
@@ -119,7 +119,7 @@ private extension View {
 
 #Preview {
     NoInternetView(
-        message: "Connect to the internet and try again.",
+        message: "Internet connection is required. Check your connection and try again.",
         retryAction: {}
     )
 }

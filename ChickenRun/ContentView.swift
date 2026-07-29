@@ -43,6 +43,9 @@ struct ContentView: View {
                     }
                 )
                 .transition(.opacity)
+                .onAppear {
+                    AppDelegate.restoreDefaultOrientations()
+                }
             case .webView(let request):
                 RoadToHeavenWebView(url: request.url, requestID: request.id)
                     .ignoresSafeArea(.keyboard, edges: .bottom)

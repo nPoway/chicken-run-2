@@ -1,14 +1,18 @@
 import Foundation
 
-enum AppConfiguration {
-    static let appleAppID = "6793132698"
-    static let storeID = "id6793132698"
+nonisolated enum AppConfiguration {
+    static let appleAppID: String? = "6793132698"
+    static let storeID: String? = "id6793132698"
     static let expectedBundleID = "app.skyboundsteps"
 
     static let siteURL = URL(string: "https://roadtoheavenluetti.com")!
     static let privacyPolicyURL = URL(string: "https://roadtoheavenluetti.com/privacy-policy.html")!
     static let supportURL = URL(string: "https://roadtoheavenluetti.com/support.html")!
-    static let configURL = URL(string: "https://roadtoheavenluetti.com/config.php")!
+    static let configURL = URL(string: "https://roadtoheavenluetti.com/config.php")
+
+    static var hasConfigEndpointConfiguration: Bool {
+        configURL != nil && storeID != nil
+    }
 
     /// The target AppsFlyer key was not supplied. Keeping it in target configuration
     /// allows the real key to be added without ever inheriting a source-project value.
@@ -34,6 +38,12 @@ enum AppConfiguration {
         Bundle.main.bundleIdentifier ?? expectedBundleID
     }
 
+    static var normalizedBundleID: String {
+        bundleID
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9.-]", with: "-", options: .regularExpression)
+    }
+
     private static var firebaseConfiguration: [String: Any] {
         guard
             let url = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist"),
@@ -55,4 +65,5 @@ enum AppConfiguration {
 
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
 }

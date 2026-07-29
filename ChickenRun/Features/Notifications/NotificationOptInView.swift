@@ -5,156 +5,272 @@
 
 import SwiftUI
 
-/// A primer shown immediately before the system notification authorization alert.
+/// A branded primer shown immediately before the system notification authorization alert.
 struct NotificationOptInView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let allowAction: () -> Void
     let skipAction: () -> Void
 
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
-
     var body: some View {
-        ZStack {
-            ChickenTheme.pageGradient
-                .ignoresSafeArea()
+        GeometryReader { proxy in
+            let isLandscape = proxy.size.width > proxy.size.height
 
-            GeometryReader { proxy in
+            ZStack {
+                primerBackground(isLandscape: isLandscape)
+                primerHero(isLandscape: isLandscape, in: proxy.size)
+                readabilityOverlay(isLandscape: isLandscape)
+                    .ignoresSafeArea()
+
                 ScrollView(showsIndicators: false) {
                     Group {
-                        if verticalSizeClass == .compact {
-                            compactLayout
+                        if isLandscape {
+                            landscapeLayout(in: proxy.size)
                         } else {
-                            regularLayout
+                            portraitLayout(in: proxy.size)
                         }
                     }
                     .frame(maxWidth: .infinity, minHeight: proxy.size.height)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, verticalSizeClass == .compact ? 14 : 28)
+                    .safeAreaPadding(.horizontal, isLandscape ? 30 : 22)
+                    .safeAreaPadding(.vertical, isLandscape ? 14 : 16)
                 }
             }
         }
+        .background(ChickenTheme.ink)
+        .accessibilityElement(children: .contain)
     }
 
-    private var regularLayout: some View {
-        VStack(spacing: 20) {
-            illustration(width: 166)
-            message(compact: false)
-            actions
-        }
-        .frame(maxWidth: 410)
-        .padding(24)
-        .notificationCard(tint: ChickenTheme.sunflower)
-    }
-
-    private var compactLayout: some View {
-        HStack(spacing: 20) {
-            illustration(width: 116)
-
-            VStack(spacing: 14) {
-                message(compact: true)
-                actions
-            }
-        }
-        .frame(maxWidth: 670)
-        .padding(18)
-        .notificationCard(tint: ChickenTheme.sunflower)
-    }
-
-    private func illustration(width: CGFloat) -> some View {
-        ZStack {
-            Circle()
-                .fill(ChickenTheme.sunflower.opacity(0.16))
-                .frame(width: width, height: width)
-
-            Image("TravelerChickenSprite")
+    private func primerBackground(isLandscape: Bool) -> some View {
+        GeometryReader { proxy in
+            Image("MorningSkyBackdrop")
                 .resizable()
-                .scaledToFit()
-                .frame(width: width * 0.78, height: width * 0.86)
-                .rotationEffect(.degrees(-5))
-
-            Image(systemName: "bell.badge.fill")
-                .font(.system(size: width * 0.21, weight: .bold))
-                .foregroundStyle(ChickenTheme.coral)
-                .padding(width * 0.10)
-                .background(.white, in: Circle())
-                .offset(x: width * 0.29, y: -width * 0.28)
+                .scaledToFill()
+                .scaleEffect(isLandscape ? 1.06 : 1)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipped()
         }
-        .shadow(color: ChickenTheme.ink.opacity(0.12), radius: 12, y: 7)
+        .ignoresSafeArea()
         .accessibilityHidden(true)
     }
 
-    private func message(compact: Bool) -> some View {
-        VStack(spacing: compact ? 6 : 10) {
-            Text("Stay close to the flock")
-                .font(.system(compact ? .title2 : .largeTitle, design: .rounded, weight: .bold))
-                .foregroundStyle(ChickenTheme.ink)
-                .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.78)
+    @ViewBuilder
+    private func primerHero(isLandscape: Bool, in size: CGSize) -> some View {
+        if isLandscape {
+            ZStack {
+                Image("TravelerChickenSprite")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: min(size.width * 0.34, 390))
+                    .position(x: size.width * 0.16, y: size.height * 0.57)
 
-            Text("Enable notifications for flight updates, fresh challenges, and a quick way back to your journey.")
-                .font(compact ? .subheadline : .body)
-                .foregroundStyle(ChickenTheme.mutedInk)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                Image("TravelerChickenFlightSprite")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: min(size.width * 0.40, 460))
+                    .position(x: size.width * 0.86, y: size.height * 0.52)
+            }
+            .frame(width: size.width, height: size.height)
+            .shadow(color: ChickenTheme.ink.opacity(0.42), radius: 22, y: 14)
+            .accessibilityHidden(true)
+        } else {
+            Image("TravelerChickenFlightSprite")
+                .resizable()
+                .scaledToFit()
+                .frame(width: min(size.width * 1.08, 520))
+                .position(x: size.width * 0.55, y: size.height * 0.43)
+                .shadow(color: ChickenTheme.ink.opacity(0.42), radius: 24, y: 16)
+                .accessibilityHidden(true)
         }
     }
 
-    private var actions: some View {
+    @ViewBuilder
+    private func readabilityOverlay(isLandscape: Bool) -> some View {
+        if isLandscape {
+            LinearGradient(
+                stops: [
+                    .init(color: ChickenTheme.sky.opacity(0.12), location: 0),
+                    .init(color: ChickenTheme.ink.opacity(0.06), location: 0.36),
+                    .init(color: ChickenTheme.ink.opacity(0.50), location: 0.62),
+                    .init(color: ChickenTheme.ink.opacity(0.98), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else {
+            LinearGradient(
+                stops: [
+                    .init(color: ChickenTheme.sky.opacity(0.20), location: 0),
+                    .init(color: ChickenTheme.ink.opacity(0.06), location: 0.30),
+                    .init(color: ChickenTheme.ink.opacity(0.18), location: 0.50),
+                    .init(color: ChickenTheme.ink.opacity(0.90), location: 0.72),
+                    .init(color: ChickenTheme.ink.opacity(0.99), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    private func portraitLayout(in size: CGSize) -> some View {
+        VStack(spacing: 0) {
+            brandLockup(compact: false)
+
+            Spacer(minLength: max(250, size.height * 0.38))
+
+            messageAndActions(compact: size.height < 700)
+                .frame(maxWidth: 440)
+        }
+        .padding(.top, max(4, size.height * 0.01))
+        .padding(.bottom, 2)
+    }
+
+    private func landscapeLayout(in size: CGSize) -> some View {
         VStack(spacing: 10) {
-            Button(action: allowAction) {
-                Label("Enable notifications", systemImage: "bell.badge.fill")
+            brandLockup(compact: true)
+
+            Spacer(minLength: max(80, size.height * 0.25))
+
+            HStack(alignment: .bottom, spacing: min(40, size.width * 0.04)) {
+                messageCopy(compact: false, alignment: .leading)
+                    .frame(maxWidth: 420, alignment: .leading)
+
+                Spacer(minLength: 16)
+
+                actionButtons(compact: true)
+                    .frame(maxWidth: 380)
             }
-            .buttonStyle(ChickenNotificationPrimaryButtonStyle())
-            .accessibilityHint("Opens the system notification permission request")
+            .padding(.bottom, min(28, max(18, size.height * 0.06)))
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func brandLockup(compact: Bool) -> some View {
+        Text("ROAD TO\nHEAVEN")
+            .font(.system(compact ? .title : .largeTitle, design: .rounded, weight: .black))
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [.white, .white, ChickenTheme.sunflower],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .multilineTextAlignment(.center)
+            .lineSpacing(compact ? -7 : -9)
+            .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.82 : 0.72)
+            .shadow(color: ChickenNotificationPalette.deepCoral, radius: 0, x: -3, y: 0)
+            .shadow(color: ChickenNotificationPalette.deepCoral, radius: 0, x: 3, y: 0)
+            .shadow(color: ChickenNotificationPalette.deepCoral, radius: 0, x: 0, y: -3)
+            .shadow(color: ChickenNotificationPalette.deepCoral, radius: 0, x: 0, y: 4)
+            .shadow(color: ChickenTheme.ink.opacity(0.72), radius: 0, y: 8)
+            .padding(.horizontal, 12)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Road to Heaven")
+    }
+
+    private func messageAndActions(compact: Bool) -> some View {
+        VStack(spacing: compact ? 10 : 14) {
+            messageCopy(compact: compact, alignment: .center)
+            actionButtons(compact: compact)
+        }
+    }
+
+    private func messageCopy(compact: Bool, alignment: TextAlignment) -> some View {
+        VStack(alignment: alignment == .leading ? .leading : .center, spacing: compact ? 5 : 9) {
+            Text("ALLOW NOTIFICATIONS ABOUT BONUSES AND PROMOS")
+                .font(.system(compact ? .subheadline : .headline, design: .rounded, weight: .black))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(alignment)
+                .lineLimit(3)
+                .minimumScaleFactor(0.72)
+                .shadow(color: .black.opacity(0.5), radius: 3, y: 2)
+
+            Text("Stay tuned with the best casino bonuses, free spins and slot offers.")
+                .font(.system(compact ? .footnote : .subheadline, design: .rounded, weight: .medium))
+                .italic()
+                .foregroundStyle(.white.opacity(0.88))
+                .multilineTextAlignment(alignment)
+                .fixedSize(horizontal: false, vertical: true)
+                .shadow(color: .black.opacity(0.42), radius: 3, y: 2)
+        }
+    }
+
+    private func actionButtons(compact: Bool) -> some View {
+        VStack(spacing: compact ? 8 : 12) {
+            Button(action: allowAction) {
+                Text("YES, I WANT BONUSES!")
+            }
+            .buttonStyle(ChickenNotificationPrimaryButtonStyle(compact: compact))
+            .accessibilityHint("Shows the system permission request for casino bonus notifications")
 
             Button(action: skipAction) {
-                Text("Skip for now")
+                Text("SKIP")
             }
-            .buttonStyle(ChickenNotificationSecondaryButtonStyle())
-            .accessibilityHint("Continues without enabling notifications")
+            .buttonStyle(ChickenNotificationSecondaryButtonStyle(compact: compact))
+            .accessibilityHint("Continues without casino bonus notifications")
         }
     }
 }
 
+private enum ChickenNotificationPalette {
+    static let deepCoral = Color(red: 0.72, green: 0.23, blue: 0.16)
+    static let secondaryButton = Color(red: 0.33, green: 0.36, blue: 0.43)
+}
+
 private struct ChickenNotificationPrimaryButtonStyle: ButtonStyle {
+    let compact: Bool
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.headline.weight(.bold))
+            .font(.system(compact ? .subheadline : .headline, design: .rounded, weight: .black))
             .foregroundStyle(.white)
-            .lineLimit(1)
-            .minimumScaleFactor(0.76)
+            .shadow(color: ChickenNotificationPalette.deepCoral, radius: 1, y: 2)
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(ChickenTheme.coral.opacity(configuration.isPressed ? 0.76 : 1), in: Capsule())
+            .frame(minHeight: compact ? 44 : 54)
+            .background {
+                RoundedRectangle(cornerRadius: compact ? 13 : 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 1, green: 0.75, blue: 0.12),
+                                ChickenTheme.sunflower,
+                                ChickenNotificationPalette.deepCoral
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: compact ? 13 : 16, style: .continuous)
+                    .stroke(Color(red: 1, green: 0.82, blue: 0.24), lineWidth: 3)
+            }
+            .shadow(
+                color: ChickenNotificationPalette.deepCoral.opacity(0.9),
+                radius: 0,
+                y: configuration.isPressed ? 2 : 5
+            )
+            .offset(y: configuration.isPressed ? 3 : 0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
 private struct ChickenNotificationSecondaryButtonStyle: ButtonStyle {
+    let compact: Bool
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.headline.weight(.semibold))
-            .foregroundStyle(ChickenTheme.ink)
-            .lineLimit(1)
+            .font(.system(compact ? .footnote : .subheadline, design: .rounded, weight: .bold))
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.5 : 0.68))
             .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .background(.white.opacity(configuration.isPressed ? 0.56 : 0.74), in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(ChickenTheme.ink.opacity(0.10), lineWidth: 1)
-            }
+            .frame(minHeight: compact ? 34 : 40)
+            .background(
+                ChickenNotificationPalette.secondaryButton
+                    .opacity(configuration.isPressed ? 0.78 : 0.92),
+                in: RoundedRectangle(cornerRadius: compact ? 13 : 16, style: .continuous)
+            )
     }
 }
 
-private extension View {
-    func notificationCard(tint: Color) -> some View {
-        background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .strokeBorder(tint.opacity(0.26), lineWidth: 1)
-            }
-            .shadow(color: ChickenTheme.ink.opacity(0.10), radius: 18, y: 10)
-    }
-}
-
-#Preview {
+#Preview("Notification Primer") {
     NotificationOptInView(allowAction: {}, skipAction: {})
 }

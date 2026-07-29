@@ -96,5 +96,5 @@ struct LaunchSplashView: View {
 }
 
 #Preview {
-    LaunchSplashView(message: "Preparing your flight")
+    LaunchSplashView(message: "Loading")
 }
