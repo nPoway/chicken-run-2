@@ -1,11 +1,5 @@
-//
-//  LaunchSplashView.swift
-//  ChickenRun
-//
-
 import SwiftUI
 
-/// The target-branded launch surface shown while the runtime resolves the first route.
 struct LaunchSplashView: View {
     let message: String
 
