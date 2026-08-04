@@ -25,7 +25,9 @@ final class GameStore: ObservableObject {
         } else {
             profile = .starter
         }
-        refreshLibraryUnlocks()
+        if refreshLibraryUnlocks() {
+            save()
+        }
     }
 
     var equippedPlumage: CosmeticItem? {
@@ -81,7 +83,7 @@ final class GameStore: ObservableObject {
         lastFlightResult = resultWithRecord
 
         awardNewAchievements()
-        refreshLibraryUnlocks()
+        _ = refreshLibraryUnlocks()
         save()
         return resultWithRecord
     }
@@ -130,10 +132,13 @@ final class GameStore: ObservableObject {
         latestUnlocks = newUnlocks
     }
 
-    private func refreshLibraryUnlocks() {
+    @discardableResult
+    private func refreshLibraryUnlocks() -> Bool {
+        let unlockedEntryIDs = profile.unlockedLibraryEntryIDs
         for entry in GameCatalog.library where entry.unlockCondition(profile) {
             profile.unlockedLibraryEntryIDs.insert(entry.id)
         }
+        return profile.unlockedLibraryEntryIDs != unlockedEntryIDs
     }
 
     private func save() {

@@ -25,7 +25,8 @@ struct RunInput: Equatable {
         flapPressed: Bool = false,
         pauseTogglePressed: Bool = false
     ) {
-        self.horizontal = min(max(horizontal, -1), 1)
+        let safeHorizontal = horizontal.isFinite ? horizontal : 0
+        self.horizontal = min(max(safeHorizontal, -1), 1)
         self.flapPressed = flapPressed
         self.pauseTogglePressed = pauseTogglePressed
     }
@@ -111,11 +112,14 @@ final class RunSimulation {
             fixedTimeStep: TimeInterval = 1.0 / 120.0,
             seed: UInt64 = 0xC1C0_0000_0000_0001
         ) {
+            let safeWidth = viewportSize.width.isFinite ? viewportSize.width : 390
+            let safeHeight = viewportSize.height.isFinite ? viewportSize.height : 844
+            let safeTimeStep = fixedTimeStep.isFinite ? fixedTimeStep : 1.0 / 120.0
             self.viewportSize = CGSize(
-                width: max(viewportSize.width, 200),
-                height: max(viewportSize.height, 300)
+                width: max(safeWidth, 200),
+                height: max(safeHeight, 300)
             )
-            self.fixedTimeStep = min(max(fixedTimeStep, 1.0 / 240.0), 1.0 / 30.0)
+            self.fixedTimeStep = min(max(safeTimeStep, 1.0 / 240.0), 1.0 / 30.0)
             self.seed = seed
         }
     }
@@ -154,7 +158,7 @@ final class RunSimulation {
             score: score,
             collectedFeathers: collectedFeathers,
             flapCharge: flapCharge,
-            flapRequirement: Self.feathersForFlap,
+            flapRequirement: GameBalance.feathersForFlap,
             currentStreak: currentStreak,
             bestStreak: bestStreak,
             airflowRemaining: max(0, airflowRemaining),
@@ -167,7 +171,6 @@ final class RunSimulation {
     init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
         random = SplitMix64(seed: configuration.seed)
-        activeSeed = configuration.seed
         player = PlayerState(position: .zero, velocity: .zero)
         resetWorld(seed: configuration.seed)
     }
@@ -190,7 +193,8 @@ final class RunSimulation {
         }
 
         pendingFlapPress = pendingFlapPress || input.flapPressed
-        let clampedElapsed = min(max(elapsed, 0), Self.maximumFrameDelta)
+        let safeElapsed = elapsed.isFinite ? elapsed : 0
+        let clampedElapsed = min(max(safeElapsed, 0), Self.maximumFrameDelta)
         accumulator += clampedElapsed
 
         var steps = 0
@@ -384,14 +388,14 @@ final class RunSimulation {
         bestStreak = max(bestStreak, currentStreak)
 
         guard currentStreak == Self.landingsForAirflow else { return }
-        airflowRemaining = Self.airflowDuration
+        airflowRemaining = GameBalance.flowDuration
         pendingAirflowBounce = true
         didTriggerAirflow = true
-        emit(.airflowActivated(duration: Self.airflowDuration))
+        emit(.airflowActivated(duration: GameBalance.flowDuration))
     }
 
     private func activateFlapIfReady() {
-        guard flapCharge >= Self.feathersForFlap else { return }
+        guard flapCharge >= GameBalance.feathersForFlap else { return }
         flapCharge = 0
         player.velocity.y = max(player.velocity.y, Self.flapVelocity)
         didUseFlap = true
@@ -406,7 +410,7 @@ final class RunSimulation {
             let reach = Self.playerRadius + Self.featherRadius
             if dx * dx + dy * dy <= reach * reach {
                 collectedFeathers += feather.value
-                flapCharge = min(Self.feathersForFlap, flapCharge + feather.value)
+                flapCharge = min(GameBalance.feathersForFlap, flapCharge + feather.value)
                 score += Self.featherScore * feather.value * currentScoreMultiplier
                 emit(.featherCollected(
                     featherID: feather.id,
@@ -678,7 +682,6 @@ final class RunSimulation {
     // MARK: - Lifecycle and events
 
     private func resetWorld(seed: UInt64) {
-        activeSeed = seed
         random = SplitMix64(seed: seed)
         elapsedTime = 0
         accumulator = 0
@@ -698,6 +701,7 @@ final class RunSimulation {
         isFinished = false
         finishedResult = nil
         pendingFlapPress = false
+        runID = UUID()
         clouds = []
         feathers = []
         nextCloudID = 1
@@ -735,7 +739,7 @@ final class RunSimulation {
         lastLandingFamily = nil
 
         let result = FlightResult(
-            id: deterministicRunID(for: activeSeed),
+            id: runID,
             height: highestHeight,
             score: score,
             collectedFeathers: collectedFeathers,
@@ -748,32 +752,13 @@ final class RunSimulation {
         emit(.finished(result))
     }
 
-    private func deterministicRunID(for seed: UInt64) -> UUID {
-        let secondHalf = seed &* 0x9E37_79B9_7F4A_7C15
-        return UUID(uuid: (
-            UInt8(truncatingIfNeeded: seed >> 56),
-            UInt8(truncatingIfNeeded: seed >> 48),
-            UInt8(truncatingIfNeeded: seed >> 40),
-            UInt8(truncatingIfNeeded: seed >> 32),
-            UInt8(truncatingIfNeeded: seed >> 24),
-            UInt8(truncatingIfNeeded: seed >> 16),
-            UInt8(truncatingIfNeeded: seed >> 8),
-            UInt8(truncatingIfNeeded: seed),
-            UInt8(truncatingIfNeeded: secondHalf >> 56),
-            UInt8(truncatingIfNeeded: secondHalf >> 48),
-            UInt8(truncatingIfNeeded: secondHalf >> 40),
-            UInt8(truncatingIfNeeded: secondHalf >> 32),
-            UInt8(truncatingIfNeeded: secondHalf >> 24),
-            UInt8(truncatingIfNeeded: secondHalf >> 16),
-            UInt8(truncatingIfNeeded: secondHalf >> 8),
-            UInt8(truncatingIfNeeded: secondHalf)
-        ))
-    }
-
     private func setPaused(_ shouldPause: Bool) {
         guard !isFinished, isPaused != shouldPause else { return }
         isPaused = shouldPause
         accumulator = 0
+        if shouldPause {
+            pendingFlapPress = false
+        }
         emit(shouldPause ? .paused : .resumed)
     }
 
@@ -790,7 +775,7 @@ final class RunSimulation {
     }
 
     private var currentScoreMultiplier: Int {
-        airflowRemaining > 0 ? Self.airflowScoreMultiplier : 1
+        airflowRemaining > 0 ? GameBalance.flowScoreMultiplier : 1
     }
 
     // MARK: - Internal state
@@ -857,7 +842,7 @@ final class RunSimulation {
     }
 
     private var random: SplitMix64
-    private var activeSeed: UInt64
+    private var runID = UUID()
     private var player: PlayerState
     private var clouds: [CloudState] = []
     private var feathers: [FeatherState] = []
@@ -915,10 +900,7 @@ final class RunSimulation {
     private static let cloudHorizontalInset: CGFloat = 10
     private static let featherRadius: CGFloat = 11
     private static let featherScore = 12
-    private static let feathersForFlap = 5
     private static let landingsForAirflow = 3
-    private static let airflowDuration: TimeInterval = 5
-    private static let airflowScoreMultiplier = 2
     private static let stormDissolveDuration: TimeInterval = 0.55
     private static let startingCloudCenterY: CGFloat = 58
     private static let generationLookAhead: CGFloat = 280

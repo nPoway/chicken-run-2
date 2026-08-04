@@ -160,6 +160,8 @@ final class ChickenGameScene: SKScene {
     }
 
     func togglePause() {
+        guard !simulation.snapshot.isFinished else { return }
+        resetTransientInputAndFrameClock()
         if simulation.snapshot.isPaused {
             simulation.resume()
         } else {
@@ -173,6 +175,7 @@ final class ChickenGameScene: SKScene {
 
     func pause() {
         guard !simulation.snapshot.isPaused, !simulation.snapshot.isFinished else { return }
+        resetTransientInputAndFrameClock()
         simulation.pause()
         process(simulation.lastEvents)
         let snapshot = simulation.snapshot
@@ -182,6 +185,7 @@ final class ChickenGameScene: SKScene {
 
     func resume() {
         guard simulation.snapshot.isPaused, !simulation.snapshot.isFinished else { return }
+        resetTransientInputAndFrameClock()
         simulation.resume()
         process(simulation.lastEvents)
         let snapshot = simulation.snapshot
@@ -191,12 +195,8 @@ final class ChickenGameScene: SKScene {
 
     func restart() {
         simulation = Self.makeSimulation(for: size)
-        horizontalInput = 0
-        swipeImpulseDirection = 0
-        swipeImpulseRemaining = 0
-        flapRequested = false
+        resetTransientInputAndFrameClock()
         didDeliverResult = false
-        lastUpdateTime = 0
         isFlowVisible = false
 
         removeAction(forKey: "scene.finishDelivery")
@@ -207,6 +207,12 @@ final class ChickenGameScene: SKScene {
 
         cloudNodes.values.forEach { $0.removeFromParent() }
         featherNodes.values.forEach { $0.removeFromParent() }
+        worldLayer.children
+            .filter { $0.name == "art.feather" }
+            .forEach { node in
+                node.removeAllActions()
+                node.removeFromParent()
+            }
         cloudNodes = [:]
         featherNodes = [:]
 
@@ -226,6 +232,14 @@ final class ChickenGameScene: SKScene {
             return horizontalInput
         }
         return swipeImpulseRemaining > 0 ? swipeImpulseDirection : 0
+    }
+
+    private func resetTransientInputAndFrameClock() {
+        horizontalInput = 0
+        swipeImpulseDirection = 0
+        swipeImpulseRemaining = 0
+        flapRequested = false
+        lastUpdateTime = 0
     }
 
     private func process(_ events: [SimulationEvent]) {
