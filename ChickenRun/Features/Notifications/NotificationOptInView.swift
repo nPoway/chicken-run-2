@@ -200,13 +200,11 @@ struct NotificationOptInView: View {
                 Text("YES, I WANT BONUSES!")
             }
             .buttonStyle(ChickenNotificationPrimaryButtonStyle(compact: compact))
-            .accessibilityHint("Shows the system permission request for casino bonus notifications")
 
             Button(action: skipAction) {
                 Text("SKIP")
             }
             .buttonStyle(ChickenNotificationSecondaryButtonStyle(compact: compact))
-            .accessibilityHint("Continues without casino bonus notifications")
         }
     }
 }

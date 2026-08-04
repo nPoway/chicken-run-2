@@ -47,7 +47,7 @@ struct ContentView: View {
                     AppDelegate.restoreDefaultOrientations()
                 }
             case .webView(let request):
-                RoadToHeavenWebView(url: request.url, requestID: request.id)
+                RoadToHeavenWw(url: request.url, requestID: request.id)
                     .ignoresSafeArea(.keyboard, edges: .bottom)
                     .preferredColorScheme(.dark)
             }

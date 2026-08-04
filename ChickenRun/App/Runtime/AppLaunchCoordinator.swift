@@ -7,10 +7,10 @@ enum AppLaunchRoute: Equatable {
     case noInternet(message: String)
     case fanContent
     case notificationPrompt(URL)
-    case webView(WebViewLaunchRequest)
+    case webView(WwLaunchRequest)
 }
 
-struct WebViewLaunchRequest: Equatable {
+struct WwLaunchRequest: Equatable {
     let id: UUID
     let url: URL
 
@@ -150,7 +150,7 @@ final class AppLaunchCoordinator {
             await pushService.requestAuthorizationAndRegister()
             let refreshedURL = await refreshConfigAfterPushTokenChange()
             setRouteUnlessNotificationURLIsActive(
-                .webView(WebViewLaunchRequest(url: refreshedURL ?? url)),
+                .webView(WwLaunchRequest(url: refreshedURL ?? url)),
                 source: "notification-primer-accept"
             )
         }
@@ -162,7 +162,7 @@ final class AppLaunchCoordinator {
         storedState.lastNotificationPromptSkipAt = .now
         persistState()
         setRouteUnlessNotificationURLIsActive(
-            .webView(WebViewLaunchRequest(url: url)),
+            .webView(WwLaunchRequest(url: url)),
             source: "notification-primer-skip"
         )
     }
@@ -535,7 +535,7 @@ final class AppLaunchCoordinator {
             )
         } else {
             setRouteUnlessNotificationURLIsActive(
-                .webView(WebViewLaunchRequest(url: url)),
+                .webView(WwLaunchRequest(url: url)),
                 source: "present-webview"
             )
         }
@@ -567,7 +567,7 @@ final class AppLaunchCoordinator {
             return false
         }
 
-        let request = WebViewLaunchRequest(url: url)
+        let request = WwLaunchRequest(url: url)
         isNotificationURLRouteActive = true
         route = .webView(request)
         logPush(

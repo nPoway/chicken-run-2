@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import WebKit
 
-struct RoadToHeavenWebView: UIViewRepresentable {
+struct RoadToHeavenWw: UIViewRepresentable {
     let url: URL
     let requestID: UUID
 
@@ -18,7 +18,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.userContentController.addUserScript(Self.inputZoomPreventionScript)
-        configuration.userContentController.addUserScript(Self.casinoDiagnosticsScript)
+        configuration.userContentController.addUserScript(Self.csDiagnosticsScript)
         configuration.userContentController.add(context.coordinator, name: Self.diagnosticsHandlerName)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -32,7 +32,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
         webView.inputAssistantItem.trailingBarButtonGroups = []
         context.coordinator.webView = webView
         context.coordinator.log("initial-load", url: url, details: "requestID=\(requestID.uuidString)")
-        context.coordinator.logCasinoNative(
+        context.coordinator.logcsNative(
             "initial-load",
             url: url,
             details: ["requestID=\(requestID.uuidString)"]
@@ -75,7 +75,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                 "webViewURL=\(webView.url?.absoluteString ?? "nil")"
             ].joined(separator: " ")
         )
-        context.coordinator.logCasinoNative(
+        context.coordinator.logcsNative(
             "update-load",
             url: url,
             details: [
@@ -139,11 +139,11 @@ struct RoadToHeavenWebView: UIViewRepresentable {
         forMainFrameOnly: false
     )
 
-    private static let casinoDiagnosticsScript = WKUserScript(
+    private static let csDiagnosticsScript = WKUserScript(
         source: """
         (function() {
-            if (window.__duperCasinoDiagnosticsInstalled) { return; }
-            window.__duperCasinoDiagnosticsInstalled = true;
+            if (window.__dupercsDiagnosticsInstalled) { return; }
+            window.__dupercsDiagnosticsInstalled = true;
 
             var lastViewportLogAt = 0;
             var lastInputLogAt = 0;
@@ -371,9 +371,9 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             #endif
         }
 
-        func logCasinoNative(_ event: String, url: URL?, details: [String] = []) {
+        func logcsNative(_ event: String, url: URL?, details: [String] = []) {
             #if DEBUG
-            var components = ["[DuperCasinoNav]", "native-\(event)"]
+            var components = ["[DupercsNav]", "native-\(event)"]
             if let url {
                 components.append(Self.compactLogComponent("url=\(url.absoluteString)"))
             }
@@ -387,18 +387,18 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             httpUpgradeAttempts.removeAll()
         }
 
-        private func logCasinoKeyboard(_ event: String, details: [String] = []) {
+        private func logcsKeyboard(_ event: String, details: [String] = []) {
             #if DEBUG
-            var components = ["[DuperCasinoKeyboard]", event]
+            var components = ["[DupercsKeyboard]", event]
             components.append(contentsOf: details.map(Self.compactLogComponent))
 
             NSLog("%@", components.joined(separator: " | "))
             #endif
         }
 
-        private func logCasinoInput(_ event: String, details: [String] = []) {
+        private func logcsInput(_ event: String, details: [String] = []) {
             #if DEBUG
-            var components = ["[DuperCasinoInput]", event]
+            var components = ["[DupercsInput]", event]
             components.append(contentsOf: details.map(Self.compactLogComponent))
 
             NSLog("%@", components.joined(separator: " | "))
@@ -543,7 +543,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? -1
             let curve = (userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.intValue ?? -1
 
-            logCasinoKeyboard(
+            logcsKeyboard(
                 event,
                 details: [
                     "begin=\(Self.rectDescription(beginFrame))",
@@ -706,7 +706,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
 
             webView.evaluateJavaScript(script) { [weak self] result, error in
                 if let error {
-                    self?.logCasinoInput(
+                    self?.logcsInput(
                         "keyboard-session-capture",
                         details: ["session=\(sessionID)", "error=\(error.localizedDescription)"]
                     )
@@ -717,7 +717,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                 let status = result["status"] as? String
                 guard status == "captured" || status == "resumed" else { return }
 
-                self?.logCasinoInput(
+                self?.logcsInput(
                     "keyboard-session-capture",
                     details: [
                         "session=\(sessionID)",
@@ -821,7 +821,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                         }
                     }
                 }
-                self?.logCasinoInput("keyboard-session-restore", details: details)
+                self?.logcsInput("keyboard-session-restore", details: details)
             }
         }
 
@@ -1105,7 +1105,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                     details.append("error=\(error.localizedDescription)")
                 }
 
-                self?.logCasinoInput("native-focused-input-visibility-check", details: details)
+                self?.logcsInput("native-focused-input-visibility-check", details: details)
             }
         }
 
@@ -1114,15 +1114,15 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             didReceive message: WKScriptMessage
         ) {
             guard
-                message.name == RoadToHeavenWebView.diagnosticsHandlerName,
+                message.name == RoadToHeavenWw.diagnosticsHandlerName,
                 let body = message.body as? [String: Any],
                 let type = body["type"] as? String
             else {
-                logCasino("[DuperCasinoJS]", event: "invalid-message", body: [:])
+                logcs("[DupercsJS]", event: "invalid-message", body: [:])
                 return
             }
 
-            logCasino(Self.casinoTag(for: type), event: type, body: body)
+            logcs(Self.csTag(for: type), event: type, body: body)
 
             guard message.frameInfo.isMainFrame else { return }
             switch type {
@@ -1138,7 +1138,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             }
         }
 
-        private func logCasino(_ tag: String, event: String, body: [String: Any]) {
+        private func logcs(_ tag: String, event: String, body: [String: Any]) {
             #if DEBUG
             let ignoredKeys = Set(["type"])
             var components = [tag, event]
@@ -1152,20 +1152,20 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             #endif
         }
 
-        private static func casinoTag(for event: String) -> String {
+        private static func csTag(for event: String) -> String {
             switch event {
             case "focusin", "focusout", "input":
-                return "[DuperCasinoInput]"
+                return "[DupercsInput]"
             case "window-resize", "orientationchange", "visual-viewport-resize", "visual-viewport-scroll":
-                return "[DuperCasinoViewport]"
+                return "[DupercsViewport]"
             case "click", "submit",
                  "history-pushState", "history-replaceState",
                  "popstate", "hashchange",
                  "pagehide", "pageshow", "beforeunload", "visibilitychange",
                  "diagnostics-installed":
-                return "[DuperCasinoNav]"
+                return "[DupercsNav]"
             default:
-                return "[DuperCasinoJS]"
+                return "[DupercsJS]"
             }
         }
 
@@ -1226,7 +1226,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                     "mainDocument=\(navigationAction.request.mainDocumentURL?.absoluteString ?? "nil")"
                 ].joined(separator: " ")
             )
-            logCasinoNative(
+            logcsNative(
                 "decide-policy",
                 url: url,
                 details: [
@@ -1242,7 +1242,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                     url: url,
                     details: "target=\(navigationAction.targetFrame?.debugLabel ?? "nil")"
                 )
-                logCasinoNative(
+                logcsNative(
                     "internal-webview-url-allow",
                     url: url,
                     details: ["target=\(navigationAction.targetFrame?.debugLabel ?? "nil")"]
@@ -1253,7 +1253,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
 
             if url.isAppStoreURL {
                 log("app-store-open-cancel-webview", url: url)
-                logCasinoNative("app-store-open-cancel-webview", url: url)
+                logcsNative("app-store-open-cancel-webview", url: url)
                 if isMainFrameNavigation {
                     finishTopLevelNavigation(in: webView)
                 }
@@ -1279,7 +1279,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
 
             guard url.isHTTPFamily else {
                 log("external-open-cancel-webview", url: url)
-                logCasinoNative("external-open-cancel-webview", url: url)
+                logcsNative("external-open-cancel-webview", url: url)
                 UIApplication.shared.open(url)
                 if isMainFrameNavigation {
                     finishTopLevelNavigation(in: webView)
@@ -1311,11 +1311,11 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             }
 
             log("create-webview-target-blank", url: url)
-            logCasinoNative("create-webview-target-blank", url: url)
+            logcsNative("create-webview-target-blank", url: url)
 
             if url.isAppStoreURL {
                 log("target-blank-app-store-open", url: url)
-                logCasinoNative("target-blank-app-store-open", url: url)
+                logcsNative("target-blank-app-store-open", url: url)
                 finishTopLevelNavigation(in: webView)
                 UIApplication.shared.open(url)
                 return nil
@@ -1338,10 +1338,10 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                 webView.load(navigationAction.request)
             } else if url.isWebViewInternalScheme {
                 log("target-blank-internal-url-skip-external-open", url: url)
-                logCasinoNative("target-blank-internal-url-skip-external-open", url: url)
+                logcsNative("target-blank-internal-url-skip-external-open", url: url)
             } else {
                 log("target-blank-external-open", url: url)
-                logCasinoNative("target-blank-external-open", url: url)
+                logcsNative("target-blank-external-open", url: url)
                 UIApplication.shared.open(url)
             }
 
@@ -1371,7 +1371,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                     "reason=possible-http-downgrade-loop"
                 ].joined(separator: " ")
                 log("http-to-https-upgrade-blocked", url: url, details: details)
-                logCasinoNative("http-to-https-upgrade-blocked", url: url, details: details.components(separatedBy: " "))
+                logcsNative("http-to-https-upgrade-blocked", url: url, details: details.components(separatedBy: " "))
                 finishTopLevelNavigation(in: webView)
                 return .blocked
             }
@@ -1387,7 +1387,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                 "upgradedURL=\(upgradedURL.absoluteString)"
             ].joined(separator: " ")
             log("http-to-https-upgrade-load", url: url, details: details)
-            logCasinoNative("http-to-https-upgrade-load", url: url, details: details.components(separatedBy: " "))
+            logcsNative("http-to-https-upgrade-load", url: url, details: details.components(separatedBy: " "))
             DispatchQueue.main.async { [weak webView] in
                 webView?.load(upgradedRequest)
             }
@@ -1404,7 +1404,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                 url: webView.url ?? lastRequestedURL,
                 details: "lastRequested=\(lastRequestedURL?.absoluteString ?? "nil")"
             )
-            logCasinoNative(
+            logcsNative(
                 "did-start-provisional",
                 url: webView.url ?? lastRequestedURL,
                 details: ["lastRequested=\(lastRequestedURL?.absoluteString ?? "nil")"]
@@ -1420,7 +1420,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
                 url: webView.url ?? lastRequestedURL,
                 details: "lastRequested=\(lastRequestedURL?.absoluteString ?? "nil")"
             )
-            logCasinoNative(
+            logcsNative(
                 "did-receive-server-redirect",
                 url: webView.url ?? lastRequestedURL,
                 details: ["lastRequested=\(lastRequestedURL?.absoluteString ?? "nil")"]
@@ -1429,14 +1429,14 @@ struct RoadToHeavenWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
             log("did-commit", url: webView.url ?? lastRequestedURL)
-            logCasinoNative("did-commit", url: webView.url ?? lastRequestedURL)
+            logcsNative("did-commit", url: webView.url ?? lastRequestedURL)
             finishTopLevelNavigation(in: webView)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             resetHTTPUpgradeAttempts()
             log("did-finish", url: webView.url ?? lastRequestedURL)
-            logCasinoNative("did-finish", url: webView.url ?? lastRequestedURL)
+            logcsNative("did-finish", url: webView.url ?? lastRequestedURL)
             finishTopLevelNavigation(in: webView)
         }
 
@@ -1446,7 +1446,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             withError error: Error
         ) {
             logFailure("did-fail-provisional", webView: webView, error: error)
-            logCasinoFailure("did-fail-provisional", webView: webView, error: error)
+            logcsFailure("did-fail-provisional", webView: webView, error: error)
             guard !error.isCancelledNavigation else { return }
             if !recoverFromTooManyRedirectsIfNeeded(webView: webView, error: error) {
                 finishTopLevelNavigation(in: webView)
@@ -1459,7 +1459,7 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             withError error: Error
         ) {
             logFailure("did-fail", webView: webView, error: error)
-            logCasinoFailure("did-fail", webView: webView, error: error)
+            logcsFailure("did-fail", webView: webView, error: error)
             guard !error.isCancelledNavigation else { return }
             if !recoverFromTooManyRedirectsIfNeeded(webView: webView, error: error) {
                 finishTopLevelNavigation(in: webView)
@@ -1490,9 +1490,9 @@ struct RoadToHeavenWebView: UIViewRepresentable {
             error.userInfo[key] as? String
         }
 
-        private func logCasinoFailure(_ event: String, webView: WKWebView, error: Error) {
+        private func logcsFailure(_ event: String, webView: WKWebView, error: Error) {
             let nsError = error as NSError
-            logCasinoNative(
+            logcsNative(
                 event,
                 url: webView.url ?? lastRequestedURL,
                 details: [
